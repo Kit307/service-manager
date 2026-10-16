@@ -80,12 +80,10 @@ export default function App() {
       return () => {
         live = false;
       };
-    const timer = setInterval(() => {
-      void update();
-    }, 750);
+    const subscription = api.onWorkspace((data) => { if (live) setWorkspace(data); }).catch(() => () => {});
     return () => {
       live = false;
-      clearInterval(timer);
+      void subscription.then((unsubscribe) => unsubscribe());
     };
   }, []);
   useEffect(() => {
@@ -96,36 +94,45 @@ export default function App() {
     let live = true;
     let cursor: string | undefined;
     let inFlight = false;
+    let pending = false;
+    let retry: ReturnType<typeof setTimeout> | undefined;
     const update = async () => {
-      if (!projectId || !serviceId || inFlight || !isDesktop()) return;
+      if (!projectId || !serviceId || !live || !isDesktop()) return;
+      if (inFlight) { pending = true; return; }
       inFlight = true;
+      pending = false;
       try {
         const page = await api.logs(projectId, serviceId, cursor);
         if (live) {
           cursor = page.nextCursor;
+          pending = page.records.length > 0;
           setGap((old) => old || page.truncated);
-          setLogs((old) =>
-            [
+          setLogs((old) => {
+            const combined = [
               ...old,
               ...page.records.filter(
                 (line) => !old.some((x) => x.seq === line.seq),
               ),
-            ].slice(-1000),
-          );
+            ].slice(-1000);
+            let bytes = 0;
+            let start = combined.length;
+            while (start > 0 && bytes + combined[start - 1].text.length * 3 + 160 <= 2 * 1024 * 1024) { bytes += combined[--start].text.length * 3 + 160; }
+            return combined.slice(start);
+          });
         }
       } catch (e) {
         if (live) setError(errorMessage(e));
       } finally {
         inFlight = false;
+        if (live && pending) { clearTimeout(retry); retry = setTimeout(() => { void update(); }, 100); }
       }
     };
     void update();
-    const timer = setInterval(() => {
-      void update();
-    }, 500);
+    const subscription = isDesktop() ? api.onLogs(() => { void update(); }).catch(() => () => {}) : Promise.resolve(() => {});
     return () => {
       live = false;
-      clearInterval(timer);
+      clearTimeout(retry);
+      void subscription.then((unsubscribe) => unsubscribe());
     };
   }, [projectId, serviceId]);
 
@@ -226,7 +233,7 @@ export default function App() {
             <Icon name="terminal" size={18} />
           </span>
           <span>Service Manager</span>
-          <span className="version">0.1</span>
+          <span className="version">0.2</span>
         </div>
         <button
           className="open-folder"

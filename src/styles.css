@@ -1084,3 +1084,16 @@ label small {
     scroll-behavior: auto !important;
   }
 }
+
+.credential details { margin-top: 16px; }
+.credential summary { cursor: pointer; font-weight: 600; }
+.credential textarea {
+  width: 100%;
+  resize: vertical;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--ink);
+}
+.credential textarea:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }

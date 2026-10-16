@@ -2,7 +2,7 @@
 
 A desktop app for running project services without typing commands in a terminal.
 
-Status: the first working desktop UI build is implemented. Command services, project configuration, live logs, loopback health checks, and authenticated MCP/proxy access are connected to the Rust manager. Docker Compose lifecycle and the complete delivery acceptance matrix remain unfinished; this is a local development build.
+Version 0.2.0 implements the local desktop workflow: command and owned Docker Compose services, project configuration, live logs, loopback health checks, and authenticated MCP/proxy access share one Rust manager. This is a local macOS development release without Developer ID signing or notarization.
 
 ## Selected stack
 
@@ -27,7 +27,7 @@ The [implementation plan](docs/superpowers/plans/2026-10-16-service-manager-plan
 
 ## Use the desktop app
 
-Open Service Manager, choose Open Folder, and add a command service. Save the definition, review it on Run, and approve its exact configuration before first execution. Settings and commands persist in `.service-manager/project.json`. Existing malformed files are preserved and reported as errors.
+Open Service Manager, choose Open Folder, and add a command or Docker Compose service. Save the definition, review it on Run, and approve its exact configuration before first execution. Settings and commands persist in `.service-manager/project.json`. Existing malformed files are preserved and reported as errors.
 
 Run supports foreground noninteractive commands such as `pnpm dev` and `go run ./cmd/api`. Stop signals the owned process group, escalates after five seconds, and waits for cleanup. Opening a folder does not execute anything. Running and Ready remain different states; configure a loopback health check to establish readiness.
 
@@ -54,12 +54,16 @@ For isolated manual testing, set `SERVICE_MANAGER_DATA_DIR` to a new directory u
 
 ## AI access
 
-See [AI connection instructions](docs/ai-connections.md). The UI and both AI access paths share one manager. SDK/proxy integration is tested against a real isolated process; the user's actual Codex and Claude configurations have not been modified or certified.
+See [AI connection instructions](docs/ai-connections.md). The UI and both AI access paths share one manager. The installed Codex CLI passed isolated MCP and shell-proxy checks. Claude Code setup is prepared; its real-client check is deferred until login, as requested. Personal client settings are never modified automatically. New profiles show copyable private configuration snippets in AI Connections.
 
-## Known remaining work
+## Docker Compose
 
-- Typed Docker Compose definitions can be loaded/edited but Run explicitly returns `COMPOSE_PENDING` without starting Docker. The complete owned-container lifecycle is a subsequent task.
-- Full real-client Codex/Claude setup, a complete native UI lifecycle smoke run, and the complete security/performance acceptance matrix remain pending.
-- Current UI refreshes status/logs by bounded local polling. The planned batched Tauri event transport and broader live-load benchmark are not implemented.
-- First-build health checks report checking/healthy/unhealthy; the planned separate 30-second startup-health diagnostic remains pending.
-- No public signing, notarization, publishing, auto-update, SSH, or deployment is included.
+Compose requires a running local Unix-socket Docker context and locally available images. The app pins the selected daemon, resolves configuration privately, labels containers/networks/volumes with a private ownership identity, and refuses pre-existing resources it cannot verify. Each run uses a private immutable snapshot, so editing the source cannot redirect Stop. The Docker CLI and Compose plugin process group must finish before Stop succeeds. Stop uses `compose stop --timeout 5`; it never invokes `down`, prune, or volume removal.
+
+The supported Compose subset is one foreground long-running container per service. Scaling overrides, explicit container names, profiles, external resources, Compose secrets/configs, and remote Docker contexts are rejected with a readable error. Use a command service for existing custom workflows; its command still has normal user permissions. The app does not install tools, build images, or pull missing images automatically.
+
+## Runtime limits
+
+Output is retained in memory with per-service/global bounds. The desktop receives change events in 100 ms batches and fetches bounded pages; it does not continually poll logs while idle. Configuration changes on disk are checked every two seconds. Health checks expose a diagnostic after 30 seconds without success and continue checking for recovery.
+
+No public signing, notarization, publishing, auto-update, SSH, remote control, dependency graph, automatic restart, persistent log archive, or deployment is included. The original plan's broader acceptance matrix is tracked honestly in [verification](docs/verification.md), including measured limits and untested surfaces.

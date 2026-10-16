@@ -1,30 +1,27 @@
-# Desktop UI build verification
+# Service Manager 0.2.0 verification
 
-## Scope
+## Implemented and exercised
 
-This delivery implements the agreed desktop interface plus a working command-service manager and local MCP/proxy path. It does not complete every task in the full implementation plan. Docker Compose lifecycle, actual personal AI client setup, complete native lifecycle interaction, and the full release acceptance matrix remain open.
+- Real native release UI: Open Folder, Cancel, empty project, Add, Save, trust review, Run, stdout marker, Restart with a new PID, Stop, and reopen with the saved service definition. Light/dark themes were inspected and screenshots contain only the synthetic fixture. A separate 900 × 600 release shell was inspected.
+- Rust: 16 automated tests cover strict config/path validation, persistence/conflicts/symlinks, reviewed-revision trust, real owned process groups, duplicate starts, stop escalation, shutdown admission, actual loopback readiness, a 30-second health diagnostic, failure/recovery, redirect refusal, cancellation after stop, bounded retention/cursors, a 20 MiB newline-free UTF-8 flood, authenticated MCP/proxy, grants and revocation.
+- React: 6 behavior tests cover launch, retained logs on reselection, stale-draft revision during workspace events, safe service creation/removal, inert plain-text filtering, and one-time private Codex/Claude configuration reveal/hide.
+- Real Docker opt-in integration: one uniquely named synthetic project using the already installed alpine image; duplicate start, ownership refusal for an existing unlabeled volume, stop during preflight, immutable launch config after editing the source, preserved stopped containers/volume, and persistent data after another run. Fixture containers/networks/volumes are cleaned explicitly by test teardown. Application Stop never removes them.
+- Codex CLI 0.153.4: actual authenticated model session read the synthetic log marker through MCP. A second isolated invocation controlled the fixture and ran the generated proxy through its shell tool; it confirmed the same marker through both paths. Per-invocation settings were used; personal settings were not changed.
+- Claude Code 2.1.181: executable found, but model authentication was unavailable. The user explicitly chose preparing configuration first. Copyable private snippets are now provided in AI Connections; no personal settings were modified.
+- Independent source review found and resolved Compose early-stop publication, surviving plugin child, resource ownership and replica-status problems. Focused recheck found no remaining P1/P2 in that scope. This is not exhaustive security certification.
 
-## Evidence collected on 2026-10-16
+## Gates
 
-- React shell renders in a native Tauri macOS `.app`, not only a browser. Its empty state and native folder picker were inspected through the native accessibility interface, and the initial empty-state screenshot was saved as a user-facing output.
-- Native inspection stopped when the app's UI state changed during interaction. No unrelated project configuration or service was run for the smoke test. Further runtime proof uses isolated temporary fixtures.
-- React behavior tests exercise initial launch, inert/plain-text log rendering and filtering, preserving unsaved config drafts and their original revision during polling, hiding removal in a new-service form, and preserving logs when reselecting the same service.
-- Rust tests exercise path/schema/duplicate validation; persistent config reopening; stale write preservation; symlink rejection; strict command/Compose fields; trust binding to the reviewed revision; actual process start and duplicate-start prevention; real stdout collection and stop; bounded log/cursor behavior; authenticated MCP and proxy with shared run identity; authorization/revocation; and credential file permissions.
-- Independent reviewer identified a trust race, shutdown admission race, and log-reselection bug. Each responsible layer was corrected; focused source recheck confirmed all three fixes. Trust and log-reselection tests were observed failing before the fixes and passing afterward.
-- A debug application bundle built and launched successfully. It measured 78.93 MiB, which is a debug build size rather than a release performance claim. Release size and final commands are recorded in the task evidence after build completion.
-- The final release bundle built successfully at 13.32 MiB and was identified as Mach-O arm64. It contains no private application state or credential files. Final gates passed: 5 React tests, 13 Rust tests, typecheck, ESLint, Clippy with warnings denied, and Rust formatting. The release executable has not undergone the full native lifecycle/performance smoke matrix; the earlier native launch used the debug bundle.
-- Node 26's experimental global storage shadowed jsdom's storage in the test worker. A differential run with the native Node storage feature disabled passed. Vitest workers now disable that feature explicitly; the application's browser storage behavior was not replaced with fake production state.
+Frontend tests, typecheck/build, ESLint, Rust tests, formatting, Clippy with warnings denied, live Docker fixture, and a release arm64 app build were run. Final artifact details and the native Quit/performance follow-up are recorded in `.agents/evidence/TASK-0002/verification.md`.
 
-## Safety boundaries
+## Contract decisions
 
-Tests use synthetic folders and commands. No real Docker container was started, no production endpoint was called, no personal AI settings were modified, and no artifact was published. Private app state, generated proxy credentials, logs, dependency trees, and native build outputs are excluded from Git.
+Lifecycle calls return a current run snapshot; the UI observes completion through status events. There is no separate operation-receipt persistence subsystem. Log gaps are represented by `truncated` and a continuation cursor. Events carry change notifications and bounded pages are fetched from the manager; they do not carry an unbounded stream of output. UI retained output has an additional 2 MiB cap.
 
-Foreground Unix process groups are the supported lifecycle boundary. Deliberately daemonized descendants and catastrophic app/OS termination are not guaranteed to be recovered. The app reports unclean prior sessions instead of guessing ownership from a stored PID.
+Compose supports one long-running container per declared service. Unsupported scaling/profiles/container names/external resources/secrets/configs are rejected. Readiness requires a successful configured loopback check or Docker health checks for all expected containers. Stopped one-shot jobs are not treated as ready. Snapshot files can contain expanded environment values; they are private and removed when the run observer finishes.
 
-## Remaining acceptance work
+## Boundaries
 
-- Actual Codex app/CLI and Claude Code version-specific connection checks.
-- Typed Compose ownership, reconciliation, data preservation, and live container cleanup.
-- Full native Open Folder → Add → Trust → Run → Logs → Restart → Stop → Reopen smoke flow, keyboard navigation, compact window and both theme checks.
-- Wider invalid/hostile input and live-load matrices, proxy interruption/closed-pipe stress, and complete health failure/recovery matrices.
-- Release startup, idle CPU, app+webview memory, and high-output memory measurements. Do not infer performance from Tauri selection or bundle size alone.
+These results certify the exercised local macOS/Apple Silicon paths, not every scenario in the original planning matrix. Actual Claude model use awaits login. Codex desktop, Claude Desktop, cloud clients, exhaustive hostile-input/load matrices, and OS crash/daemonized-child recovery are not certified. No deployment, public publishing, signing identity, or notarization was performed.
+
+Commands and reviewed Compose files run with normal user/Docker permissions. They are not sandboxed by this application. Existing user projects and stacks were excluded from tests. Abrupt OS/app termination can leave services behind; restart warns instead of killing or adopting arbitrary stored PIDs.

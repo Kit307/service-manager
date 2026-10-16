@@ -158,7 +158,7 @@ pub async fn run(args: Vec<String>) -> i32 {
                 let mut capped = false;
                 for record in records {
                     if options.run.as_ref().is_some_and(|r| record.get("runId").and_then(Value::as_str) != Some(r)) { cursor = record.get("seq").and_then(Value::as_u64).map(|n| n.to_string()); continue; }
-                    let line = format!("[{} {}] {}\n", record["timestamp"].as_str().unwrap_or(""), record["stream"].as_str().unwrap_or(""), record["text"].as_str().unwrap_or(""));
+                    let line = format!("[{} {}] {}{}\n", record["timestamp"].as_str().unwrap_or(""), record["stream"].as_str().unwrap_or(""), record["text"].as_str().unwrap_or(""), if record["truncated"].as_bool() == Some(true) { " … [truncated]" } else { "" });
                     if bytes + line.len() > 128 * 1024 { capped = true; break; }
                     if std::io::stdout().lock().write_all(line.as_bytes()).is_err() { return Ok::<i32, AppError>(0); }
                     bytes += line.len(); cursor = record.get("seq").and_then(Value::as_u64).map(|n| n.to_string());

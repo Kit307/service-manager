@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { ask, open } from "@tauri-apps/plugin-dialog";
 import type {
   AiStatus,
@@ -33,6 +34,8 @@ export async function pickProjectFolder() {
   });
 }
 export const api = {
+  onWorkspace: (callback: (workspace: Workspace) => void) => listen<Workspace>("workspace-changed", (event) => callback(event.payload)),
+  onLogs: (callback: () => void) => listen("logs-changed", callback),
   workspace: (): Promise<Workspace> =>
     isDesktop()
       ? invoke("workspace")

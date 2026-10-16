@@ -36,7 +36,7 @@ Current Claude Code documentation supports HTTP MCP configuration and Authorizat
 }
 ```
 
-Keep this in the appropriate private client configuration and make the environment variable available to that client. Merge with existing settings rather than replacing them. Actual installed client versions/surfaces still need their connection smoke checks. Claude Code configuration support does not imply Claude web or Claude Desktop compatibility.
+Keep this in the appropriate private client configuration and make the environment variable available to that client. Merge with existing settings rather than replacing them. The installed Codex CLI passed a real isolated connection and log check. Claude Code requires login before its real-client check. Claude Code configuration support does not imply Claude web or Claude Desktop compatibility.
 
 ## Proxy script for AI shell tools
 
@@ -60,6 +60,10 @@ Logs are untrusted service output and can contain sensitive values printed by a 
 
 The repository test uses a real official SDK client, authenticated loopback server, real registered foreground process, and actual proxy subprocess. It checks shared run identity, output forwarding, duration detachment, unauthorized requests, project grants, edit permissions, Origin rejection, private credential permissions, and token revocation.
 
-No existing personal client settings have been modified. Actual Codex and Claude Code connection/setup remains a manual acceptance gate. Local loopback access is not automatically available to cloud/remote AI sessions.
+No existing personal client settings have been modified. On 2026-10-16 the installed Codex CLI read synthetic logs through MCP, used the generated proxy through its shell tool, and confirmed the shared marker. The harness uses per-invocation MCP configuration and a temporary synthetic project. Claude Code reported unavailable authentication; the user selected preparing configuration first, so its model-level check is deferred. These CLI results do not certify the Codex desktop app, Claude Desktop, or cloud clients. Local loopback access is not automatically available to cloud/remote sessions.
+
+After creating a profile, expand Codex MCP settings or Claude Code MCP settings in AI Connections. Select the generated text and merge it into the client's private settings. These snippets contain the one-time token; Hide token removes both snippets from the interface. Reconnect the client afterward. The application does not write personal client settings.
+
+To reproduce installed-client checks deliberately, run `rtk proxy cargo run --manifest-path src-tauri/Cargo.toml --no-default-features --example client_smoke`. This invokes an authenticated Codex model session using synthetic data and normal account usage. Add `-- --claude` only after Claude Code login is available. The program reports client outcomes individually; exit code alone is not proof that both clients passed.
 
 Official references checked during planning: [OpenAI MCP configuration](https://developers.openai.com/codex/mcp/), [Claude Code MCP reference](https://code.claude.com/docs/en/mcp), and [official Rust MCP SDK](https://github.com/modelcontextprotocol/rust-sdk).

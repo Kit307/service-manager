@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { api } from "../lib/api";
+import { api, confirmAction } from "../lib/api";
 import type { Workspace } from "../lib/types";
 import { Icon } from "./Icon";
 
@@ -98,10 +98,11 @@ export function AiConnections({
             <button
               className="tiny danger-text"
               disabled={busy}
-              onClick={() => {
+              onClick={async () => {
                 if (
-                  window.confirm(
+                  await confirmAction(
                     `Revoke ${client.name}? Its token and proxy access will stop working.`,
+                    "Revoke client?",
                   )
                 )
                   void perform(() => api.revokeClient(client.id));
@@ -218,6 +219,16 @@ export function AiConnections({
               onFocus={(e) => e.target.select()}
             />
           </label>
+          <details>
+            <summary>Codex MCP settings</summary>
+            <p>Paste into your private Codex config.toml, then reconnect. This contains your token.</p>
+            <textarea aria-label="Codex MCP configuration" className="mono" readOnly rows={5} value={`[mcp_servers.service_manager]\nurl = ${JSON.stringify(workspace.ai.endpoint)}\nhttp_headers = { Authorization = ${JSON.stringify(`Bearer ${credential.token}`)} }`} onFocus={(e) => e.target.select()} />
+          </details>
+          <details>
+            <summary>Claude Code MCP settings</summary>
+            <p>Merge into your private MCP settings, then reconnect. Claude Code must be logged in.</p>
+            <textarea aria-label="Claude Code MCP configuration" className="mono" readOnly rows={12} value={JSON.stringify({mcpServers: {service_manager: {type: "http", url: workspace.ai.endpoint, headers: {Authorization: `Bearer ${credential.token}`}}}}, null, 2)} onFocus={(e) => e.target.select()} />
+          </details>
           <p>
             Use the proxy through your AI's shell tool to receive service logs
             on stdout. Closing the proxy leaves the service running.

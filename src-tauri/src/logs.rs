@@ -27,6 +27,9 @@ pub struct LogStore {
 }
 impl LogStore {
     pub fn push(&mut self, key: &str, run: &str, stream: &str, text: &str) {
+        self.push_chunk(key, run, stream, text, false);
+    }
+    pub fn push_chunk(&mut self, key: &str, run: &str, stream: &str, text: &str, continued: bool) {
         self.seq += 1;
         let mut cleaned = String::new();
         let mut escape = false;
@@ -53,7 +56,7 @@ impl LogStore {
             run_id: run.into(),
             timestamp: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
             stream: stream.into(),
-            truncated: text.len() > 16380,
+            truncated: continued || text.len() > 16380,
             text: cleaned,
         };
         let size = record.text.len() + 160;
@@ -134,5 +137,8 @@ impl LogStore {
         while self.entries.get(key).is_some_and(|v| !v.is_empty()) {
             self.evict(key);
         }
+    }
+    pub fn revision(&self) -> u64 {
+        self.seq
     }
 }

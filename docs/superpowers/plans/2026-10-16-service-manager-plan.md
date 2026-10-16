@@ -633,3 +633,7 @@ The plan chooses a single local HTTP endpoint based on documented transport/auth
 The plan maps every agreed flow to a task: Open Folder/config persistence (1–2), editable commands and trust (2–3), lifecycle/logs/readiness (3–5), Compose (6), complete desktop navigation (7), shared AI control (8), proxy-script log forwarding and real Codex/Claude Code connections (9), and release/performance proof (10).
 
 Fixed choices are recorded rather than left as unanswered product questions. Deployment, public signing, unrelated projects, and remote execution stay outside scope. Implementation starts at Task 1 only after the user requests execution; this planning request does not install dependencies or modify external client settings.
+
+## 11. Implementation record — 0.2.0
+
+The runnable desktop/runtime described by Tasks 1–10 is implemented in the existing modules; the planning file layout was consolidated where one owner was sufficient. Current contracts and measured verification boundaries are recorded in `docs/verification.md` and `.agents/evidence/TASK-0002/verification.md`. Historical unchecked task bullets above remain a proposed exhaustive matrix, not a false claim that every variant was exercised. Claude authentication was unavailable and the user selected preparing its configuration first. Controlled startup/full-app flood benchmarks and untested client surfaces remain explicit acceptance gaps. Idle CPU/RSS is recorded in TASK-0002 evidence, including the peak RSS goal miss.

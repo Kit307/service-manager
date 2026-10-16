@@ -1,9 +1,10 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import App from "../App";
 import * as native from "../lib/api";
 import { LogPanel } from "../components/LogPanel";
+import { AiConnections } from "../components/AiConnections";
 import type { Workspace } from "../lib/types";
 
 function fixture(revision = "revision-a"): Workspace {
@@ -68,9 +69,9 @@ describe("workspace interactions", () => {
   });
   it("keeps the original editor revision when background refresh observes an external edit", async () => {
     vi.spyOn(native, "isDesktop").mockReturnValue(true);
-    const workspace = vi
-      .spyOn(native.api, "workspace")
-      .mockResolvedValue(fixture());
+    vi.spyOn(native.api, "workspace").mockResolvedValue(fixture());
+    let onWorkspace: ((data: Workspace) => void) | undefined;
+    vi.spyOn(native.api, "onWorkspace").mockImplementation(async (callback) => { onWorkspace = callback; return () => {}; });
     vi.spyOn(native.api, "logs").mockResolvedValue({
       records: [],
       nextCursor: "0",
@@ -90,8 +91,7 @@ describe("workspace interactions", () => {
     await user.click(screen.getByRole("button", { name: "Edit service" }));
     await user.clear(screen.getByLabelText("Service name"));
     await user.type(screen.getByLabelText("Service name"), "My edited name");
-    workspace.mockResolvedValue(fixture("revision-b"));
-    await new Promise((resolve) => setTimeout(resolve, 850));
+    await act(async () => onWorkspace?.(fixture("revision-b")));
     await user.click(screen.getByRole("button", { name: "Save service" }));
     await waitFor(() =>
       expect(screen.getByRole("alert")).toHaveTextContent(
@@ -153,4 +153,19 @@ describe("workspace interactions", () => {
       screen.queryByText("<script>untrusted()</script>"),
     ).not.toBeInTheDocument();
   });
+  it("reveals private Codex and Claude configuration only for the new profile", async () => {
+    const user = userEvent.setup();
+    const data = fixture(); data.ai.enabled = true;
+    vi.spyOn(native.api, "createClient").mockResolvedValue({id: "client-fixture", token: "synthetic-token", proxyPath: "/private-fixture/proxy.sh"});
+    render(<AiConnections workspace={data} onRefresh={async () => {}} onError={() => {}} />);
+    expect(screen.queryByLabelText("Claude Code MCP configuration")).not.toBeInTheDocument();
+    await user.click(screen.getByLabelText("Fixture project"));
+    await user.click(screen.getByRole("button", {name: "Create profile & proxy"}));
+    const config = await screen.findByLabelText("Claude Code MCP configuration");
+    expect(JSON.parse((config as HTMLTextAreaElement).value).mcpServers.service_manager.headers.Authorization).toBe("Bearer synthetic-token");
+    expect((screen.getByLabelText("Codex MCP configuration") as HTMLTextAreaElement).value).toContain("[mcp_servers.service_manager]");
+    await user.click(screen.getByRole("button", {name: "Hide token"}));
+    expect(screen.queryByLabelText("Claude Code MCP configuration")).not.toBeInTheDocument();
+  });
+
 });

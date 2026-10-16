@@ -32,6 +32,8 @@ pub struct PrivateState {
     pub projects: HashMap<String, String>,
     pub trust: HashMap<String, HashMap<String, String>>,
     pub dirty: bool,
+    #[serde(default)]
+    pub compose_owners: HashMap<String, String>,
 }
 pub struct ProjectStore {
     pub state_dir: PathBuf,

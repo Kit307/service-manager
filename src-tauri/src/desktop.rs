@@ -4,7 +4,7 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc,
 };
-use tauri::{Manager as _, State};
+use tauri::{Emitter, Manager as _, State};
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
 
 pub struct DesktopState {
@@ -145,6 +145,16 @@ async fn revoke_client(state: State<'_, DesktopState>, id: String) -> Result<()>
 
 pub fn run() {
     let app = tauri::Builder::default()
+        .menu(|app| {
+            let menu = tauri::menu::Menu::default(app)?;
+            if let Some(tauri::menu::MenuItemKind::Submenu(application)) = menu.items()?.first() {
+                // Native predefined Quit calls NSApp terminate directly, bypassing controlled cleanup.
+                application.remove_at(application.items()?.len() - 1)?;
+                application.append(&tauri::menu::MenuItem::with_id(app, "managed-quit", "Quit Service Manager", true, Some("CmdOrCtrl+Q"))?)?;
+            }
+            Ok(menu)
+        })
+        .on_menu_event(|app, event| { if event.id.as_ref() == "managed-quit" { app.exit(0); } })
         .plugin(tauri_plugin_single_instance::init(|app, _, _| {
             if let Some(w) = app.get_webview_window("main") {
                 let _ = w.show();
@@ -163,6 +173,28 @@ pub fn run() {
                 ai,
                 exiting: Arc::new(AtomicBool::new(false)),
                 prompting: Arc::new(AtomicBool::new(false)),
+            });
+            let handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                let mut previous = String::new();
+                let mut log_revision = 0;
+                let mut ticks = 0u32;
+                loop {
+                    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                    let state = handle.state::<DesktopState>();
+                    if ticks.is_multiple_of(20) { state.manager.projects().await; }
+                    ticks = ticks.wrapping_add(1);
+                    let store = state.manager.store.lock().await;
+                    let mut projects: Vec<_> = store.projects.values().cloned().collect();
+                    projects.sort_by(|a, b| a.name.cmp(&b.name));
+                    let unclean = store.unclean;
+                    drop(store);
+                    let data = json!({"projects": projects, "ai": state.ai.status().await, "uncleanShutdown": unclean});
+                    let revision = crate::project::hash(&serde_json::to_vec(&data).unwrap_or_default());
+                    if revision != previous { let _ = handle.emit("workspace-changed", data); previous = revision; }
+                    let seq = state.manager.logs.lock().await.revision();
+                    if seq != log_revision { let _ = handle.emit("logs-changed", seq); log_revision = seq; }
+                }
             });
             let open = tauri::menu::MenuItem::with_id(
                 app,
@@ -222,7 +254,12 @@ pub fn run() {
                 api.prevent_exit();
                 if state.prompting.swap(true, Ordering::SeqCst) { return; }
                 let manager = state.manager.clone(); let bridge = state.ai.clone(); let exiting = state.exiting.clone(); let prompting = state.prompting.clone(); let handle = handle.clone();
-                handle.clone().dialog().message("Stop active services and quit? Closing the window only hides it; services keep running until you stop them or quit.").title("Quit Service Manager").buttons(MessageDialogButtons::OkCancelCustom("Stop services & quit".into(), "Cancel".into())).show(move |confirmed| {
+                let mut dialog = handle.dialog().message("Stop active services and quit? Closing the window only hides it; services keep running until you stop them or quit.").title("Quit Service Manager").buttons(MessageDialogButtons::OkCancelCustom("Stop services & quit".into(), "Cancel".into()));
+                if let Some(window) = handle.get_webview_window("main") {
+                    let _ = window.show(); let _ = window.set_focus();
+                    dialog = dialog.parent(&window);
+                }
+                dialog.show(move |confirmed| {
                     if !confirmed { prompting.store(false, Ordering::SeqCst); return; }
                     tauri::async_runtime::spawn(async move {
                         let _ = bridge.set_enabled(false).await;

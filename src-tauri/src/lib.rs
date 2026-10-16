@@ -1,3 +1,4 @@
+pub mod compose;
 #[cfg(feature = "desktop")]
 pub mod desktop;
 pub mod logs;

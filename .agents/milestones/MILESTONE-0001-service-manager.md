@@ -14,3 +14,6 @@ Tauri, Rust, React, TypeScript, native macOS toolchain, public package registrie
 See docs/superpowers/plans/2026-10-16-service-manager-plan.md, Tasks 1–10.
 ## Completion Criteria
 The acceptance checklist in the implementation plan passes; unverified integrations remain explicitly pending.
+
+## Delivery status — 0.2.0
+The local desktop, command/Compose runtime and shared AI access are implemented and packaged. TASK-0002 records the completed runtime work and evidence. The original full acceptance checklist remains open only where explicitly listed in docs/verification.md: Claude login/client proof, untested client surfaces and broader/performance matrices. Do not treat this milestone as exhaustive certification.
