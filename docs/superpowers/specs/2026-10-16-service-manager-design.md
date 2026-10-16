@@ -1,0 +1,62 @@
+# Service Manager Design
+
+## Objective
+
+Provide a desktop interface for opening a code folder and managing its development services. Codex and Claude must be able to control the same services and read the same logs through MCP.
+
+This document records the agreed product flow. Framework selection and client-specific connection setup remain implementation planning decisions; compatibility has not yet been tested.
+
+## Desktop workflow
+
+The user selects Open Folder. The app loads the project's saved configuration. If none exists, it presents an empty state with Add Service. The app must not execute commands merely because a folder was opened.
+
+A service has a stable identifier, a display name, a working directory relative to the project root, and a run command. Optional settings include environment variable names or references and a health-check URL. Secret values must not be written into shareable project configuration.
+
+The user can add and edit services, then run, stop, or restart them. Changes persist per project. The interface displays projects and services on the left, status and controls in the center, and live logs below.
+
+## Shared process ownership
+
+One local service manager owns process lifecycle, status, configuration writes, and log collection. Both the desktop interface and MCP call this manager. MCP connections must not create independent managers or duplicate service processes.
+
+Concurrent start requests for the same service must produce at most one managed process. Configuration writes must be validated and atomic. A command change applies to the next run rather than silently restarting an active service.
+
+The manager distinguishes stopped, starting, running, ready, stopping, and failed states. A running process is only marked ready when its configured health check succeeds. Without a health check, the app reports running without claiming readiness.
+
+Stop targets the owned service and its child processes, never unrelated processes using a matching name or port. Restart waits for stop to finish. Docker Compose services require explicit lifecycle handling because a command exiting does not necessarily mean its containers stopped.
+
+The initial lifecycle policy is to keep management available while the window is hidden. Quitting the manager must offer stopping active services or cancelling quit; leaving unmanaged processes behind is not an implicit default.
+
+## Logs
+
+Capture stdout and stderr with timestamps, service identifiers, and run identifiers. The UI receives live updates. Keep bounded log history to prevent unbounded memory or disk use.
+
+MCP exposes bounded reads with a cursor so AI clients can request recent output and fetch subsequent lines without rereading everything. Logs are untrusted service output, never instructions to execute commands. Log access may reveal application data or secrets already printed by the service; it must remain scoped to authorized projects.
+
+## MCP integration
+
+Expose tools to list authorized projects and services, read and update service configuration, start, stop, and restart registered services, query status, and read logs.
+
+Each operation uses explicit project and service identifiers. Switching the selected UI folder must not redirect an in-flight AI request to a different project. Restrict access to projects explicitly opened and authorized locally.
+
+MCP must not expose an arbitrary standalone shell-execution tool. Editing a service command still grants code-execution capability, so the connection must be local and authenticated, and imported or AI-modified executable configuration requires local trust before first execution. Do not automatically execute configuration supplied by an untrusted repository.
+
+Codex and Claude connect to the same manager using the MCP transport supported by their target clients. Provide client setup instructions only after confirming the chosen transport works with each client. No embedded AI chat or model API key is required in the desktop app.
+
+## Initial scope
+
+- Open Folder and persistent service configuration.
+- Add and edit services and their run commands.
+- Run, stop, restart, status, and live logs.
+- MCP access for Codex and Claude to the same service manager.
+- Local development services only; opening a folder never grants deployment or remote-server authority.
+
+## Verification required before delivery
+
+- Save configuration, close and reopen the project, and verify it reloads correctly.
+- Reject malformed configuration and invalid working directories without starting processes or losing saved settings.
+- Exercise start, duplicate concurrent start, stop, restart, failed commands, health checks, and child-process cleanup using isolated fixtures.
+- Verify Docker Compose status and shutdown against owned fixture containers.
+- Verify stdout and stderr capture, run separation, bounded history, and incremental MCP reads.
+- Confirm UI and AI operations share state, including project switching during an AI request.
+- Confirm unauthorized clients and projects cannot control processes or read logs.
+- Perform actual connection and service-control smoke checks from both Codex and Claude before claiming client compatibility.
