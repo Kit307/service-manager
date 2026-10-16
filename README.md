@@ -54,6 +54,8 @@ For isolated manual testing, set `SERVICE_MANAGER_DATA_DIR` to a new directory u
 
 ## AI access
 
+An installable [Service Manager skill](docs/service-manager-skill.md) is included under `skills/service-manager` for Codex and Claude Code. It teaches MCP control, safe config edits and proxy log continuation; credentials and grants remain separate.
+
 See [AI connection instructions](docs/ai-connections.md). The UI and both AI access paths share one manager. The installed Codex CLI passed isolated MCP and shell-proxy checks. Claude Code setup is prepared; its real-client check is deferred until login, as requested. Personal client settings are never modified automatically. New profiles show copyable private configuration snippets in AI Connections.
 
 ## Docker Compose

@@ -67,3 +67,7 @@ After creating a profile, expand Codex MCP settings or Claude Code MCP settings 
 To reproduce installed-client checks deliberately, run `rtk proxy cargo run --manifest-path src-tauri/Cargo.toml --no-default-features --example client_smoke`. This invokes an authenticated Codex model session using synthetic data and normal account usage. Add `-- --claude` only after Claude Code login is available. The program reports client outcomes individually; exit code alone is not proof that both clients passed.
 
 Official references checked during planning: [OpenAI MCP configuration](https://developers.openai.com/codex/mcp/), [Claude Code MCP reference](https://code.claude.com/docs/en/mcp), and [official Rust MCP SDK](https://github.com/modelcontextprotocol/rust-sdk).
+
+## Optional agent skill
+
+Install the bundled [Service Manager skill](service-manager-skill.md) to teach clients the actual tool contracts and proxy continuation behavior. Installing the skill does not connect MCP, issue credentials, or expand project grants.
