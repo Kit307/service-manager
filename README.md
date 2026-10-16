@@ -4,6 +4,12 @@ A desktop app for running project services without typing commands in a terminal
 
 Status: project initialized; design recorded. The application and MCP integration are not implemented yet.
 
+## Selected stack
+
+- Tauri for the desktop application shell and native webview.
+- React and TypeScript for the user interface.
+- Rust for shared service lifecycle, configuration, log collection, and MCP integration.
+
 ## Agreed workflow
 
 1. Open a project folder.

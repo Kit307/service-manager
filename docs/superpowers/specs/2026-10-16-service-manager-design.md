@@ -4,7 +4,15 @@
 
 Provide a desktop interface for opening a code folder and managing its development services. Codex and Claude must be able to control the same services and read the same logs through MCP.
 
-This document records the agreed product flow. Framework selection and client-specific connection setup remain implementation planning decisions; compatibility has not yet been tested.
+This document records the agreed product flow and selected stack. Client-specific connection setup remains an implementation planning decision; compatibility has not yet been tested.
+
+## Selected stack and ownership
+
+Use Tauri for the desktop shell, React with TypeScript for the interface, and Rust for service management and MCP integration. Tauri uses the platform webview, supporting the goal of a lightweight desktop application. Actual application size, startup time, and memory usage must be measured before making performance claims.
+
+React renders project configuration, service status, controls, and logs. It calls a narrow set of validated Tauri commands and receives status and log events. It must not own service processes or execute shell commands directly.
+
+The Rust manager owns all service state and lifecycle invariants. The MCP interface calls the same Rust manager as the Tauri commands. AI connections must not spawn independent service managers. No Node.js runtime is required for the application's own backend; managed project services may still require Node.js or other tools installed on the machine.
 
 ## Desktop workflow
 
