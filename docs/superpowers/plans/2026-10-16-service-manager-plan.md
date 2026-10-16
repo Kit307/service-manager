@@ -6,6 +6,8 @@
 
 **Architecture:** A single Tauri application hosts a Rust manager. React uses validated Tauri commands and events; authenticated local MCP connections call the same manager. Service processes and Docker Compose resources are owned by that manager, independently of the selected UI project.
 
+An AI-facing proxy script invokes a non-GUI mode of the same Rust executable, connects as an authenticated MCP client, and forwards the manager's logs into AI shell-tool output. It does not own service processes or create a second backend.
+
 **Tech Stack:** Tauri 2, Rust, React, TypeScript, Vite, pnpm, native CSS, and the official Rust MCP SDK. Use the native macOS webview; do not bundle Chromium or a Node.js backend.
 
 ## สรุปแผนภาษาไทย
@@ -13,6 +15,8 @@
 เริ่มบน macOS Apple Silicon ใช้ Tauri + Rust + React + TypeScript เปิดโฟลเดอร์โค้ดแล้วเพิ่ม service พร้อมคำสั่งรันได้ เก็บค่าที่ `.service-manager/project.json` เปิดโฟลเดอร์เดิมแล้วค่าเดิมยังอยู่ แต่ไม่เริ่มรันเอง หน้าแอปมีรายการโปรเจกต์และ service ทางซ้าย ปุ่มควบคุมตรงกลาง และ log สดด้านล่าง
 
 Rust เป็นเจ้าของ process และ log เพียงชุดเดียว ทั้งหน้าแอปและ AI เรียกตัวจัดการนี้ผ่านคนละช่องทาง ให้ Codex และ Claude Code ต่อ MCP ผ่าน HTTP บนเครื่องพร้อม token และสิทธิ์แยกตามโปรเจกต์ ผู้ใช้เปิดสิทธิ์ให้ AI อ่าน log, ควบคุม หรือเพิ่มและแก้คำสั่งได้จากหน้าแอป
+
+เพิ่ม proxy script สำหรับ AI ที่ใช้ shell tool: AI เรียก script เพื่อสั่งตัวจัดการเดิมให้รัน service แล้ว script ส่ง log กลับทาง stdout ให้ AI อ่าน พร้อมกับที่ log ขึ้นในแอป การหมดเวลาของ shell tool หรือการปิด proxy ไม่หยุด service และไม่เปิด service ซ้ำ
 
 ลำดับงานคือ (1) แอปพื้นฐาน (2) config และฟอร์มเพิ่ม service (3) trust และ Run/Stop/Restart (4) log สดแบบจำกัดหน่วยความจำ (5) health check และการปิดแอป (6) Docker Compose (7) หน้าแอปครบ flow (8) MCP และสิทธิ์ (9) ทดสอบ Codex/Claude Code จริง (10) แพ็ก `.app` พร้อมวัดขนาด เวลาเปิด และ RAM
 
@@ -53,6 +57,7 @@ Rust เป็นเจ้าของ process และ log เพียงช�
 | Logs | Live stdout/stderr; bounded in-memory history, no default persistent log files |
 | Readiness | Optional loopback HTTP health check; otherwise status is running, never automatically ready |
 | AI clients | Codex local app/CLI and Claude Code local client; test each intended surface independently |
+| AI shell-tool output | A local proxy wrapper forwards logs from the shared manager through an authenticated MCP client; no second process manager |
 | MCP transport | Streamable HTTP at `http://127.0.0.1:47831/mcp`, authenticated per-client bearer token |
 | MCP port conflicts | Report connection feature unavailable and offer a manually chosen port; never contact, kill, or silently replace the occupying process |
 | AI authorization | Per-client project grants: read, control, and optional edit. Only the desktop UI can grant or expand permissions |
@@ -223,6 +228,32 @@ Mark only observational tools read-only. Mark lifecycle/config writes as mutatio
 - Local Codex app/CLI and Claude Code are the acceptance targets. Claude web/remote connectors and cloud Codex are excluded because their ability to reach this machine's loopback is different. Claude Desktop support is not implied by a passing Claude Code test.
 - Standard MCP integration tests can run with synthetic credentials. Changes to a person's existing AI client settings require explicit execution authorization; absent that, supply setup and record the real-client checks as pending.
 
+### Proxy script for AI shell tools
+
+The user also requires log output to flow through a script into the AI tool's captured output. Support this as a second access path to the same manager, not a second execution engine:
+
+```text
+AI shell tool -> local proxy script -> Rust proxy mode -> authenticated MCP
+                                                          |
+Desktop UI <--- status + live logs <--- shared manager -> service process
+AI shell tool <--- stdout log records <--- Rust proxy mode <--- read_logs
+```
+
+Implement `service-manager proxy run --project <project-id> --service <service-id> [--duration <seconds>]` and `service-manager proxy logs --project <project-id> --service <service-id> [--run <run-id>] [--cursor <cursor>] [--follow] [--duration <seconds>]`. These are planned command interfaces, not currently installed commands.
+
+- Parse proxy mode before Tauri GUI initialization so a proxy call never opens a window, registers another desktop instance, or creates a manager. Use the official Rust MCP SDK client against the configured loopback endpoint.
+- Run calls `start_service` once, captures its returned run ID, and follows that run's output for up to 15 seconds and 128 KiB. If the service is already active, attach to its existing run without duplicating it. Query status rather than retrying the start if a response is lost.
+- Logs defaults to a bounded recent snapshot. `--follow` polls `read_logs` with cursors; follow duration defaults to 15 seconds and can be explicitly set between 1 and 60 seconds. Run uses the same duration limit. Stop sooner on terminal run state after draining retained records, byte limit, interrupt, or disconnected output.
+- Forward service records as tagged text on stdout. Put proxy diagnostics and a final structured JSON summary on stderr containing project/service/run IDs, last state, operation outcome when available, reason capture ended, truncation information, and `nextCursor`. Never print credentials.
+- A successful bounded capture can return while the service is still running. Exit code 0 means the proxy request/capture succeeded, not that a long-lived service finished or became ready. Use 1 for a known failed service/operation, 2 for invalid arguments, 3 for unavailable backend/transport, 4 for authentication/authorization failure, and 130 for an interrupt. Pair every exit with a truthful summary when stderr remains available.
+- Timeout, Ctrl-C, a closed pipe, or killing the AI tool's proxy process detaches the observer only. It must not send Stop, kill the managed process, or disconnect the desktop's log collectors. Starting a service remains an explicit side effect even if its caller disappears immediately afterward.
+- Use returned cursors to request later output; never restart a service to retrieve more logs. Deduplicate record sequence numbers and surface history eviction. Logs remain untrusted application output.
+- AI Connections offers Create Proxy Script. It explicitly creates a wrapper and dedicated credential profile in private app-data storage, with restrictive permissions and paths correctly quoted for spaces. The wrapper forwards arguments unchanged to the bundled executable. Show/copy its absolute invocation; do not require a global PATH installation.
+- Store the proxy's bearer token in a separate `0600` credential file associated with its grant profile. The server continues to store the token hash. This file grants the same capability as private client credentials; same-user arbitrary code is outside the protection boundary. Never pass tokens in argv, expose them in script source, or put machine-specific generated wrappers/credentials into shareable project config.
+- The proxy profile receives only the locally selected project read/control grants. It cannot silently inherit all projects or edit permissions. Revoking it terminates its sessions. It cannot enable AI Connections or issue credentials itself.
+- Missing app, disabled AI Connections, stale wrapper executable path, missing credential file, port conflict, or revoked token produce an actionable error. Never auto-launch a hidden manager or downgrade authentication.
+- Explain that an AI client must actually execute the proxy command and retain/read its output. A script cannot inject logs into an idle chat on its own; future reads occur through explicit tool calls.
+
 ## 4. Interfaces and ownership
 
 Wire DTOs use camelCase via Serde. `src/lib/types.ts` mirrors the Rust DTOs and has contract fixtures checked in both test suites. Avoid a new schema-codegen tool until manual DTO maintenance demonstrably causes drift.
@@ -309,6 +340,7 @@ src-tauri/
   src/health.rs                   # cancellable loopback readiness checks
   src/commands.rs                 # Tauri handlers and UI-only authorization actions
   src/mcp.rs                      # SDK tool handlers and loopback HTTP assembly
+  src/proxy.rs                    # non-GUI MCP client mode and bounded stdout forwarding
   capabilities/default.json      # minimum local-webview permissions
   tauri.conf.json                 # desktop settings and restrictive content policy
   tests/                          # config, lifecycle, MCP and security integration tests
@@ -327,6 +359,7 @@ Do not create empty future files. Create a file when its task implements it; fol
 - Frontend runtime: React, React DOM, and Tauri APIs/plugins for native folder selection and required lifecycle integration. No router, Redux, terminal emulator, icon library, or component framework initially.
 - Frontend dev: Vite, TypeScript, Vitest, Testing Library, and the minimum lint tooling from the selected React template.
 - Rust: Tauri, Tokio, Serde/serde_json, UUID, thiserror, nix for Unix signalling, reqwest with a rustls TLS backend, dotenvy, SHA-256/random/constant-time helpers, and rmcp/Axum for standard MCP HTTP. Reuse versions/features already brought in by the scaffold where correct.
+- Enable rmcp's client transport for proxy mode as well as its server transport. Parse the small fixed proxy argument surface directly unless the selected scaffold already includes a fitting CLI parser; do not create a general shell runner or extra Node/Python runtime.
 - Rust dev: tempfile for isolated filesystem tests. Use standard library process fixtures or small committed shell fixtures rather than adding a second application runtime solely for tests.
 - No SQLite, background daemon, message broker, generic plugin system, or database migration layer.
 
@@ -506,16 +539,20 @@ desktop grants A edit on P -> upsert succeeds with current revision, no auto-sta
 desktop revokes A -> all later calls and active continuations rejected
 ```
 
-### Task 9: Codex and Claude Code connection flow
+### Task 9: Proxy script and Codex/Claude Code connection flow
 
-**Files:** `AiConnections.tsx`, setup snippet generation, `docs/ai-connections.md`, client setup tests, sanitized evidence.
+**Files:** `src-tauri/src/proxy.rs`, early CLI dispatch in `main.rs`, `AiConnections.tsx`, setup snippet/wrapper generation, `docs/ai-connections.md`, `src-tauri/tests/proxy_output.rs`, client setup tests, sanitized evidence.
 
-**Consumes:** real MCP endpoint, per-client tokens and grants. **Produces:** separate working connection instructions for the target clients, without modifying their configuration automatically.
+**Consumes:** real MCP endpoint, per-client tokens and grants. **Produces:** a bounded AI proxy script plus separate working connection instructions for the target clients, without modifying their configuration automatically.
 
 - [ ] Verify current installed client versions and their documented HTTP auth fields before generating instructions. Keep sample tokens synthetic.
+- [ ] Write failing proxy tests for stdout/stderr forwarding, attach-to-existing-run, cursor continuation, byte/duration caps, service failure, app offline, revoked credentials, paths with spaces, and interruption/closed pipe without stopping the managed service.
+- [ ] Implement non-GUI proxy dispatch and the SDK client from the contract above. Generate the private wrapper/profile only on explicit local UI action; refuse silent overwrite. Keep generic shell execution and direct child spawning out of proxy mode.
+- [ ] Exercise a real proxy subprocess against an isolated SDK test server and then the real manager. Assert one service run ID appears in the desktop, direct MCP reads, and proxy stdout. Kill the proxy subprocess and verify the service continues; explicitly stop the fixture through the manager afterward.
 - [ ] Add copyable setup instructions and explain private token handling, local app availability, client reload, and revocation. Do not force terminal use for normal service management; connection instructions can target each client's settings UI or private config.
 - [ ] Test snippet formatting and that token reveal is one-time. Do not put credentials in copied project configuration, app logs, or a URL.
 - [ ] With authorized client setup, connect Codex and Claude Code separately to an isolated synthetic project and list services, start, query status/readiness, read stdout/stderr, upsert a harmless definition with edit grant, restart, and stop. Confirm UI reflects every action.
+- [ ] From each target client's shell tool, execute the generated proxy to run a harmless registered fixture and read its stdout. Verify the AI can quote a unique synthetic log marker, then request later logs using the continuation cursor without starting a second run. Record this separately from direct MCP tool verification.
 - [ ] Also test app offline, wrong token, revoked token, and restart reconnect. Record actual client surface/version and outcomes individually. A passing CLI test does not certify the desktop app surface.
 - [ ] If user authentication or client settings changes cannot be performed, finish all unaffected setup/test work and clearly leave only those real-client gates pending. Never disable authentication to obtain a passing test.
 - [ ] Commit setup documentation and sanitized evidence.
@@ -566,6 +603,7 @@ Use deterministic Tokio time control for health thresholds and deadlines where p
 - [ ] Health checks distinguish running from ready and remain cancellable.
 - [ ] External config edits preserve user work and invalidate executable trust where required.
 - [ ] Codex and Claude Code each pass their actual local connection/service-control checks, with target surface/version recorded.
+- [ ] Proxy script forwards the same run's logs into actual AI shell-tool output; bounded capture, cursor continuation, revocation, and observer disconnection are verified without duplicated or implicitly stopped services.
 - [ ] Unauthorized clients/projects cannot read logs or control services; revocation works.
 - [ ] Closing/hiding and quitting behave as documented; failed cleanup is visible.
 - [ ] Release bundle launches from Finder; measured performance and limits are recorded.
@@ -592,6 +630,6 @@ The plan chooses a single local HTTP endpoint based on documented transport/auth
 
 ## 10. Plan review
 
-The plan maps every agreed flow to a task: Open Folder/config persistence (1–2), editable commands and trust (2–3), lifecycle/logs/readiness (3–5), Compose (6), complete desktop navigation (7), shared AI control (8), real Codex/Claude Code connections (9), and release/performance proof (10).
+The plan maps every agreed flow to a task: Open Folder/config persistence (1–2), editable commands and trust (2–3), lifecycle/logs/readiness (3–5), Compose (6), complete desktop navigation (7), shared AI control (8), proxy-script log forwarding and real Codex/Claude Code connections (9), and release/performance proof (10).
 
 Fixed choices are recorded rather than left as unanswered product questions. Deployment, public signing, unrelated projects, and remote execution stay outside scope. Implementation starts at Task 1 only after the user requests execution; this planning request does not install dependencies or modify external client settings.

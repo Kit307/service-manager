@@ -52,12 +52,23 @@ MCP must not expose an arbitrary standalone shell-execution tool. Editing a serv
 
 Codex and Claude connect to the same manager using the MCP transport supported by their target clients. Provide client setup instructions only after confirming the chosen transport works with each client. No embedded AI chat or model API key is required in the desktop app.
 
+## AI proxy script
+
+In addition to direct MCP tools, provide a thin proxy script for AI clients that execute shell tools. The script calls a proxy mode of the existing Rust executable; that mode connects to the running application's authenticated MCP endpoint. It never starts an independent manager or launches the service itself.
+
+The AI calls the proxy to run a registered service or read its logs. The app continues to own the process and show live logs; the proxy forwards those same retained records to the AI tool's stdout. Bounded reads and run-scoped cursors let AI retrieve subsequent output without rerunning the service.
+
+The run command follows logs for at most 15 seconds and 128 KiB by default, then reports the run ID, state, and continuation cursor. Reaching that limit or disconnecting the proxy leaves the service running. An explicit service Stop remains a separate manager action. If the app is unavailable, the proxy reports that error rather than launching a hidden fallback.
+
+Proxy credentials use the same project permissions as other clients and are stored in a private local credential file, never passed in command-line arguments. Generating the local wrapper and credential file is an explicit UI action and must not overwrite an existing file silently.
+
 ## Initial scope
 
 - Open Folder and persistent service configuration.
 - Add and edit services and their run commands.
 - Run, stop, restart, status, and live logs.
 - MCP access for Codex and Claude to the same service manager.
+- A proxy script that forwards managed service logs to AI shell-tool output while the desktop shows the same run.
 - Local development services only; opening a folder never grants deployment or remote-server authority.
 
 ## Verification required before delivery
@@ -70,3 +81,4 @@ Codex and Claude connect to the same manager using the MCP transport supported b
 - Confirm UI and AI operations share state, including project switching during an AI request.
 - Confirm unauthorized clients and projects cannot control processes or read logs.
 - Perform actual connection and service-control smoke checks from both Codex and Claude before claiming client compatibility.
+- Run the proxy from an AI shell tool, verify its stdout matches the desktop run, and prove bounded capture, cursor continuation, disconnect, and timeout never start duplicate services or stop the managed service implicitly.

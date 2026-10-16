@@ -17,9 +17,10 @@ Status: project initialized; design recorded. The application and MCP integratio
 3. Run, stop, or restart services and view live logs.
 4. Reopen the folder to restore its saved configuration.
 5. Let Codex and Claude use MCP to manage registered services and read their logs.
+6. Let AI shell tools call a proxy script that starts a registered service through the same manager and forwards its logs to the tool output.
 
 Each project can contain multiple services with different working directories and commands, including Go, Node.js, and Docker Compose.
 
 See [the design](docs/superpowers/specs/2026-10-16-service-manager-design.md) for behavior and implementation boundaries.
 
-The [implementation plan](docs/superpowers/plans/2026-10-16-service-manager-plan.md) includes a Thai overview, fixed first-release choices, architecture, service and MCP contracts, ten sequential implementation tasks, and delivery acceptance checks. No application dependencies have been installed yet.
+The [implementation plan](docs/superpowers/plans/2026-10-16-service-manager-plan.md) includes a Thai overview, fixed first-release choices, architecture, service, MCP and proxy-script contracts, ten sequential implementation tasks, and delivery acceptance checks. No application dependencies have been installed yet.
