@@ -21,3 +21,5 @@ Status: project initialized; design recorded. The application and MCP integratio
 Each project can contain multiple services with different working directories and commands, including Go, Node.js, and Docker Compose.
 
 See [the design](docs/superpowers/specs/2026-10-16-service-manager-design.md) for behavior and implementation boundaries.
+
+The [implementation plan](docs/superpowers/plans/2026-10-16-service-manager-plan.md) includes a Thai overview, fixed first-release choices, architecture, service and MCP contracts, ten sequential implementation tasks, and delivery acceptance checks. No application dependencies have been installed yet.

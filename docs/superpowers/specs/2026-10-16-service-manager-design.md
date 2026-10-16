@@ -6,6 +6,8 @@ Provide a desktop interface for opening a code folder and managing its developme
 
 This document records the agreed product flow and selected stack. Client-specific connection setup remains an implementation planning decision; compatibility has not yet been tested.
 
+The complete [implementation plan](../plans/2026-10-16-service-manager-plan.md) records the fixed first-release choices, module contracts, sequential tasks, security boundaries, and acceptance checks. It selects macOS Apple Silicon first, project-local JSON, and an authenticated loopback Streamable HTTP MCP endpoint shared by the desktop application and local Codex/Claude Code clients.
+
 ## Selected stack and ownership
 
 Use Tauri for the desktop shell, React with TypeScript for the interface, and Rust for service management and MCP integration. Tauri uses the platform webview, supporting the goal of a lightweight desktop application. Actual application size, startup time, and memory usage must be measured before making performance claims.
@@ -46,7 +48,7 @@ Expose tools to list authorized projects and services, read and update service c
 
 Each operation uses explicit project and service identifiers. Switching the selected UI folder must not redirect an in-flight AI request to a different project. Restrict access to projects explicitly opened and authorized locally.
 
-MCP must not expose an arbitrary standalone shell-execution tool. Editing a service command still grants code-execution capability, so the connection must be local and authenticated, and imported or AI-modified executable configuration requires local trust before first execution. Do not automatically execute configuration supplied by an untrusted repository.
+MCP must not expose an arbitrary standalone shell-execution tool. Editing a service command still grants code-execution capability, so the connection must be local and authenticated. Imported executable configuration requires local trust before first execution. AI changes require an explicit local project-specific edit grant, which can authorize subsequent MCP edits without a prompt per edit; MCP cannot grant this permission to itself. External file changes still invalidate affected executable trust. Do not automatically execute configuration supplied by an untrusted repository.
 
 Codex and Claude connect to the same manager using the MCP transport supported by their target clients. Provide client setup instructions only after confirming the chosen transport works with each client. No embedded AI chat or model API key is required in the desktop app.
 
