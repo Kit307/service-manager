@@ -152,6 +152,15 @@ pub fn run() {
                 application.remove_at(application.items()?.len() - 1)?;
                 application.append(&tauri::menu::MenuItem::with_id(app, "managed-quit", "Quit Service Manager", true, Some("CmdOrCtrl+Q"))?)?;
             }
+            for item in menu.items()? {
+                if let tauri::menu::MenuItemKind::Submenu(window) = item {
+                    if window.id().as_ref() == tauri::menu::WINDOW_SUBMENU_ID {
+                        // The native Minimize menu action can remain enabled after the titlebar button is removed.
+                        window.remove_at(0)?;
+                        window.insert(&tauri::menu::MenuItem::with_id(app, "disabled-minimize", "Minimize", false, Some("CmdOrCtrl+M"))?, 0)?;
+                    }
+                }
+            }
             Ok(menu)
         })
         .on_menu_event(|app, event| { if event.id.as_ref() == "managed-quit" { app.exit(0); } })

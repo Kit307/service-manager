@@ -2,7 +2,7 @@
 
 A desktop app for running project services without typing commands in a terminal.
 
-Version 0.2.1 implements the local desktop workflow: command and owned Docker Compose services, project configuration, live logs, loopback health checks, and authenticated MCP/proxy access share one Rust manager. This is a local macOS development release without Developer ID signing or notarization.
+Version 0.2.2 implements the local desktop workflow: command and owned Docker Compose services, project configuration, live logs, loopback health checks, and authenticated MCP/proxy access share one Rust manager. This is a local macOS development release without Developer ID signing or notarization.
 
 ## Selected stack
 
@@ -27,7 +27,7 @@ The [implementation plan](docs/superpowers/plans/2026-10-16-service-manager-plan
 
 ## Use the desktop app
 
-New windows open maximized to the available desktop area; manual resizing remains available. Open Service Manager, choose Open Folder, and add a command or Docker Compose service. Save the definition, review it on Run, and approve its exact configuration before first execution. Settings and commands persist in `.service-manager/project.json`. Existing malformed files are preserved and reported as errors.
+Window minimization is disabled; manual resizing remains available and startup uses the normal window size. Open Service Manager, choose Open Folder, and add a command or Docker Compose service. Save the definition, review it on Run, and approve its exact configuration before first execution. Settings and commands persist in `.service-manager/project.json`. Existing malformed files are preserved and reported as errors.
 
 Run supports foreground noninteractive commands such as `pnpm dev` and `go run ./cmd/api`. Stop signals the owned process group, escalates after five seconds, and waits for cleanup. Opening a folder does not execute anything. Running and Ready remain different states; configure a loopback health check to establish readiness.
 
