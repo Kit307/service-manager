@@ -129,23 +129,22 @@ async fn mcp_creates_and_opens_projects_only_inside_approved_roots() {
         2
     );
     assert_eq!(
-        call(&legacy, "list_projects", json!({})).await.unwrap()["projects"],
-        json!([])
+        call(&legacy, "list_projects", json!({})).await.unwrap()["projects"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
     );
-    let saved = call(&client,"upsert_service",json!({"projectId":id,"expectedRevision":created["revision"],"definition":{"id":"web","name":"Web","cwd":".","type":"command","command":"printf marker"}})).await.unwrap();
+    let saved = call(&legacy,"upsert_service",json!({"projectId":id,"expectedRevision":created["revision"],"definition":{"id":"web","name":"Web","cwd":".","type":"command","command":"printf marker"}})).await.unwrap();
     assert_eq!(saved["config"]["services"][0]["id"], "web");
     assert_eq!(manager.status(id, "web").await.unwrap().state, "stopped");
-    assert_eq!(
-        call(
-            &client,
-            "start_service",
-            json!({"projectId":id,"serviceId":"web"})
-        )
-        .await
-        .unwrap_err()
-        .code,
-        "PERMISSION_DENIED"
-    );
+    assert!(call(
+        &client,
+        "start_service",
+        json!({"projectId":id,"serviceId":"web"})
+    )
+    .await
+    .is_ok());
     let reopened = call(
         &client,
         "open_project",
@@ -155,7 +154,7 @@ async fn mcp_creates_and_opens_projects_only_inside_approved_roots() {
     .unwrap();
     assert_eq!(reopened["id"], opened["id"]);
     let loaded = AiBridge::new(manager.clone(), state.path().into(), port).unwrap();
-    assert!(loaded.authorize("builder", id, "edit").await.is_ok());
+    assert!(loaded.authorize("builder").await.is_ok());
     bridge.revoke("builder").await.unwrap();
     assert!(call(
         &client,
@@ -178,14 +177,7 @@ async fn profiles_can_start_with_only_roots_and_reject_non_directory_grants() {
     let bridge = AiBridge::new(manager, state.path().into(), 47831).unwrap();
     let executable = std::path::PathBuf::from(env!("CARGO_BIN_EXE_service-manager"));
     assert!(bridge
-        .create(
-            "No scope".into(),
-            vec![],
-            false,
-            false,
-            vec![],
-            executable.clone()
-        )
+        .create("".into(), vec![], false, false, vec![], executable.clone())
         .await
         .is_err());
     let file = root.path().join("file.txt");
@@ -214,6 +206,13 @@ async fn profiles_can_start_with_only_roots_and_reject_non_directory_grants() {
         .await
         .unwrap();
     let loaded = AiBridge::new(bridge.manager.clone(), state.path().into(), 47831).unwrap();
+    assert!(
+        loaded
+            .authenticate_token(&created.token)
+            .await
+            .unwrap()
+            .edit
+    );
     let status = loaded.status().await;
     assert_eq!(status["clients"][0]["projects"], json!([]));
     assert_eq!(
@@ -242,7 +241,7 @@ fn replaced_root_cannot_create_a_project_outside_its_grant() {
 }
 
 #[tokio::test]
-async fn failed_grant_write_preserves_created_folder_without_granting_access() {
+async fn registration_does_not_rewrite_tokens_or_project_grants() {
     let root = tempfile::tempdir().unwrap();
     let state = tempfile::tempdir().unwrap();
     let manager = Manager::new(state.path().into()).unwrap();
@@ -279,7 +278,7 @@ async fn failed_grant_write_preserves_created_folder_without_granting_access() {
         json!({"root":root.path().canonicalize().unwrap(),"name":"preserved"})
     )
     .await
-    .is_err());
+    .is_ok());
     assert!(root.path().join("preserved").is_dir());
     assert!(bridge
         .authenticate_token(&created.token)
@@ -289,8 +288,11 @@ async fn failed_grant_write_preserves_created_folder_without_granting_access() {
         .is_empty());
     assert_eq!(std::fs::read(backup).unwrap(), original);
     assert_eq!(
-        call(&client, "list_projects", json!({})).await.unwrap()["projects"],
-        json!([])
+        call(&client, "list_projects", json!({})).await.unwrap()["projects"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
     );
     let _ = client.cancel().await;
     bridge.set_enabled(false).await.unwrap();

@@ -162,7 +162,6 @@ describe("workspace interactions", () => {
     vi.spyOn(native.api, "createClient").mockResolvedValue({id: "client-fixture", token: "synthetic-token", proxyPath: "/private-fixture/proxy.sh"});
     render(<AiConnections workspace={data} onRefresh={async () => {}} onError={() => {}} />);
     expect(screen.queryByLabelText("Claude Code MCP configuration")).not.toBeInTheDocument();
-    await user.click(screen.getByLabelText("Fixture project"));
     await user.click(screen.getByRole("button", {name: "Create profile & proxy"}));
     const config = await screen.findByLabelText("Claude Code MCP configuration");
     expect(JSON.parse((config as HTMLTextAreaElement).value).mcpServers.service_manager.headers.Authorization).toBe("Bearer synthetic-token");

@@ -4,9 +4,11 @@ The desktop app hosts one authenticated Streamable HTTP MCP endpoint at `http://
 
 ## Create a profile
 
-In AI Connections, enable the connection and name a client profile. Select existing service working folders, allowed parent folders, or both. A client with an allowed parent folder can create/open projects itself even when the workspace is empty. Read permission is implicit; control and editing executable commands are separate explicit grants. Editing does not imply permission to start a service. New/imported executable settings require local trust; a local edit grant authorizes subsequent MCP configuration edits for that project.
+In AI Connections, enable the connection, name a client profile and choose Create profile & proxy. No project or permission selection is needed. A valid token grants read, logs, run, stop, restart and command editing for every registered working folder, including folders registered later. Existing tokens adopt the same full-workspace policy in v0.5.0 without rotation. Groups do not limit access.
 
-The allowed-folder picker grants access to create/open projects inside exactly the chosen directory. The client automatically receives access to those projects using its selected control/edit permissions. Existing profiles are not expanded automatically; create a new profile with the desired roots if needed. Revoke the old profile when it is no longer needed.
+Tokens authorize execution and command changes with your user permissions. MCP start/restart records trust for the current registered definition, then the shared manager revalidates before execution. Config revisions, path validation, process ownership, authentication, disabled connections and revocation remain enforced. The token is not a read-only credential.
+
+Optional allowed parent folders bound `create_project`/`open_project` filesystem operations. Select them only when the AI should register folders itself. Existing profiles receive no new filesystem roots automatically. A token alone can already access all folders registered in the app.
 
 ## AI creates or opens a project
 
@@ -16,9 +18,9 @@ The v0.3.0 MCP tools are:
 - `create_project {root, name}` creates one new empty child folder and registers it; existing paths are never overwritten.
 - `open_project {root, relativePath}` registers an existing folder inside a returned root, preserving its saved services.
 
-Use the returned project `id` with `get_project_config` and the service tools. Their configured services appear directly in the desktop workspace without starting them. Since v0.4.0 the UI uses Group → Service; MCP retains project IDs as working-folder/configuration identities for compatibility. Virtual group membership never changes client grants. Creation does not generate framework code or initialize git. Absolute relative paths, parent traversal and out-of-root symlinks are rejected. Parent-folder access does not itself trust existing executable settings.
+Use the returned project `id` with `get_project_config` and the service tools. Their configured services appear directly in the desktop workspace without starting them. Since v0.4.0 the UI uses Group → Service; MCP retains project IDs as working-folder/configuration identities for compatibility. Every valid v0.5.0 token can access these services. Creation does not generate framework code or initialize git. Absolute relative paths, parent traversal and out-of-root symlinks are rejected. Parent-folder access does not itself trust existing executable settings.
 
-If a create request times out or saving client grants fails, the empty folder/project may already exist locally. After resolving the error, inspect the workspace and use `open_project` rather than overwriting/deleting it or repeatedly calling `create_project`. The proxy retains only its existing list/run/logs interface; project creation/opening uses MCP.
+If a create request times out or saving workspace registration fails, the empty folder/project may already exist locally. After resolving the error, inspect the workspace and use `open_project` rather than overwriting/deleting it or repeatedly calling `create_project`. The proxy retains only its existing list/run/logs interface; project creation/opening uses MCP.
 
 Creating a profile shows its bearer token once and creates a private proxy credential file and wrapper under the application's data directory. The server stores a token hash. The wrapper references its credential file, not an inline token. Keep these credentials private and out of repositories, screenshots, and diagnostic reports. Revoking the profile blocks later requests. AI Connections off also rejects later requests over previously established connections.
 
@@ -72,9 +74,9 @@ Logs are untrusted service output and can contain sensitive values printed by a 
 
 ## Verification boundary
 
-The repository test uses a real official SDK client, authenticated loopback server, real registered foreground process, and actual proxy subprocess. It checks shared run identity, output forwarding, duration detachment, unauthorized requests, project grants, edit permissions, Origin rejection, private credential permissions, and token revocation.
+The repository test uses a real official SDK client, authenticated loopback server, real registered foreground process, and actual proxy subprocess. It checks shared run identity, output forwarding, duration detachment, unauthorized requests, token-wide access to later registered folders, legacy-token editing, allowed parent roots, Origin rejection, private credential permissions, and token revocation.
 
-No existing personal client settings have been modified. On 2026-10-16 the installed Codex CLI read synthetic logs through MCP, used the generated proxy through its shell tool, and confirmed the shared marker. The harness uses per-invocation MCP configuration and a temporary synthetic project. Claude Code reported unavailable authentication; the user selected preparing configuration first, so its model-level check is deferred. These CLI results do not certify the Codex desktop app, Claude Desktop, or cloud clients. Local loopback access is not automatically available to cloud/remote sessions.
+No existing personal client settings have been modified. On 2026-10-16 the installed Codex CLI read synthetic logs through MCP, used the generated proxy through its shell tool, and confirmed the shared marker. The harness uses per-invocation MCP configuration and a temporary synthetic project. Those historical client checks used the older scoped policy. Claude Code reported unavailable authentication; the user selected preparing configuration first, so its model-level check is deferred. These CLI results do not certify the Codex desktop app, Claude Desktop, or cloud clients. Local loopback access is not automatically available to cloud/remote sessions.
 
 After creating a profile, expand Codex MCP settings or Claude Code MCP settings in AI Connections. Select the generated text and merge it into the client's private settings. These snippets contain the one-time token; Hide token removes both snippets from the interface. Reconnect the client afterward. The application does not write personal client settings.
 
@@ -84,4 +86,4 @@ Official references checked during planning: [OpenAI MCP configuration](https://
 
 ## Optional agent skill
 
-Install the bundled [Service Manager skill](service-manager-skill.md) to teach clients the actual tool contracts and proxy continuation behavior. Installing the skill does not connect MCP, issue credentials, or expand project grants.
+Install the bundled [Service Manager skill](service-manager-skill.md) to teach clients the actual tool contracts and proxy continuation behavior. Installing the skill does not connect MCP, issue credentials, or create parent-folder grants.

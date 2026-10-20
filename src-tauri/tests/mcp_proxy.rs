@@ -24,10 +24,6 @@ async fn real_sdk_and_proxy_share_one_run_and_revocation_blocks_access() {
         health_check: None,
     };
     manager.save(&p.id, def, "absent", false).await.unwrap();
-    let mut store = manager.store.lock().await;
-    let revision = store.refresh(&p.id).unwrap().revision;
-    store.trust(&p.id, "web", &revision).unwrap();
-    drop(store);
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let port = listener.local_addr().unwrap().port();
     drop(listener);
@@ -36,8 +32,8 @@ async fn real_sdk_and_proxy_share_one_run_and_revocation_blocks_access() {
     let created = bridge
         .create(
             "test-client".into(),
-            vec![p.id.clone()],
-            true,
+            vec![],
+            false,
             false,
             vec![],
             std::path::PathBuf::from(env!("CARGO_BIN_EXE_service-manager")),
@@ -51,8 +47,25 @@ async fn real_sdk_and_proxy_share_one_run_and_revocation_blocks_access() {
     })
     .await
     .unwrap();
+    let later_root = tempfile::tempdir().unwrap();
+    let later = manager
+        .open(later_root.path().to_str().unwrap())
+        .await
+        .unwrap();
     let list = call(&client, "list_projects", json!({})).await.unwrap();
-    assert_eq!(list["projects"][0]["id"], p.id);
+    assert_eq!(list["projects"].as_array().unwrap().len(), 2);
+    assert!(list["projects"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|p| p["id"] == later.id));
+
+    let later_config = call(&client, "get_project_config", json!({"projectId":later.id}))
+        .await
+        .unwrap();
+    let saved = call(&client, "upsert_service", json!({"projectId":later.id,"expectedRevision":later_config["revision"],"definition":{"id":"new","name":"New","cwd":".","type":"command","command":"printf later"}})).await.unwrap();
+    assert_eq!(saved["config"]["services"][0]["id"], "new");
+    assert!(call(&client, "upsert_service", json!({"projectId":later.id,"expectedRevision":"stale","definition":{"id":"new","name":"New","cwd":".","type":"command","command":"printf replacement"}})).await.is_err());
     let key = json!({"projectId":p.id,"serviceId":"web"});
     let first = call(&client, "start_service", key.clone()).await.unwrap();
     let run = first["runId"].as_str().unwrap().to_string();
@@ -112,7 +125,7 @@ async fn real_sdk_and_proxy_share_one_run_and_revocation_blocks_access() {
         .await
         .unwrap_err()
         .code,
-        "PERMISSION_DENIED"
+        "CONFIG_INVALID"
     );
     assert_eq!(
         call(
@@ -125,6 +138,9 @@ async fn real_sdk_and_proxy_share_one_run_and_revocation_blocks_access() {
         .code,
         "PROJECT_NOT_AUTHORIZED"
     );
+    let restarted = call(&client, "restart_service", key.clone()).await.unwrap();
+    assert_ne!(restarted["runId"].as_str(), Some(run.as_str()));
+    let _restart_cleanup = Cleanup(restarted["pid"].as_u64().unwrap() as u32);
     let http = reqwest::Client::builder().no_proxy().build().unwrap();
     let unauth = http
         .post(&bridge.endpoint)

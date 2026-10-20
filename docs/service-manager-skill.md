@@ -2,7 +2,7 @@
 
 Skill นี้สอน Codex/Claude ใช้ MCP และ proxy ของ Service Manager: สร้างหรือเปิดโปรเจกต์ในโฟลเดอร์หลักที่อนุญาต, หา project/service ที่ถูกต้อง, Run/Stop/Restart, อ่าน log ต่อด้วย cursor, เพิ่ม/แก้ command ด้วย revision และแยกข้อความใน log ออกจากคำสั่งของผู้ใช้
 
-Skill ไม่ได้ติดตั้ง MCP connection, สร้าง token, login AI หรือเพิ่มสิทธิ์ให้เอง ต้องเปิดแอปและตั้ง client profile ใน AI Connections ก่อน ตาม [คู่มือ AI](ai-connections.md)
+Skill ไม่ได้ติดตั้ง MCP connection, สร้าง token, login AI หรือเพิ่มสิทธิ์ให้เอง ต้องเปิดแอปและสร้าง token ใน AI Connections ก่อน ตาม [คู่มือ AI](ai-connections.md)
 
 ## ตำแหน่งไฟล์
 
@@ -56,6 +56,6 @@ Claude Code:
 
 ให้ client อ่าน skill และบอกวิธีใช้ `logs --cursor ... --run ... --follow` ต่อจากการ capture ครั้งแรก โดยไม่เริ่ม service ซ้ำ จากนั้นทดสอบกับ service ชั่วคราวที่ตั้งใจเปิดใช้เท่านั้น ตรวจสถานะและ runId ในแอปว่าเป็นชุดเดียวกัน
 
-การพบไฟล์ skill ไม่ได้แปลว่า MCP เชื่อมต่อแล้ว หาก app offline, token revoked หรือไม่มี grant ต้องแก้ connection ตามสิทธิ์เดิมก่อน ห้ามใช้ skill ข้าม trust หรืออ่าน credentials
+การพบไฟล์ skill ไม่ได้แปลว่า MCP เชื่อมต่อแล้ว ตั้งแต่แอป v0.5.0 token ที่ใช้ได้มีสิทธิ์อ่าน/รัน/หยุด/แก้ command ทุก service รวมที่เพิ่มภายหลัง โดยไม่เลือกทีละโปรเจกต์ ส่วนการสร้างหรือเปิดโฟลเดอร์ใหม่ยังต้องตั้ง parent folder ก่อน หาก app offline หรือ token revoked ต้องแก้ connection ก่อน ห้ามใช้ skill ข้าม trust หรืออ่าน credentials
 
 เอกสารรูปแบบและ discovery ที่ตรวจเมื่อ 2026-10-16: [OpenAI official skills guide](https://learn.chatgpt.com/docs/build-skills), [Claude Code skills](https://code.claude.com/docs/en/skills)

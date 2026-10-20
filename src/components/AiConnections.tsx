@@ -13,10 +13,7 @@ export function AiConnections({
   onError: (error: unknown) => void;
 }) {
   const [name, setName] = useState("Codex");
-  const [projects, setProjects] = useState<string[]>([]);
   const [projectRoots, setProjectRoots] = useState<string[]>([]);
-  const [control, setControl] = useState(true);
-  const [edit, setEdit] = useState(false);
   const [busy, setBusy] = useState(false);
   const [credential, setCredential] = useState<{
     token: string;
@@ -79,7 +76,11 @@ export function AiConnections({
       </section>
       <section className="settings-section">
         <h2>Connected client profiles</h2>
-        <p>Choose which working folders and actions each client may access. Groups do not change AI permissions.</p>
+        <p>
+          Every valid token can read logs, run, stop, restart and edit commands
+          for all services, including services added later. Groups do not
+          restrict access.
+        </p>
         {!workspace.ai.clients.length && (
           <p className="empty-inline">
             No client profiles yet. Create one for each AI client.
@@ -91,12 +92,14 @@ export function AiConnections({
             <div>
               <strong>{client.name}</strong>
               <span>
-                {client.projects.length} working folders · Read
-                {client.control ? " + control" : ""}
-                {client.edit ? " + edit commands" : ""}
-                {client.projectRoots?.length ? ` · ${client.projectRoots.length} allowed folders` : ""}
+                All services · Read + control + edit commands
+                {client.projectRoots?.length
+                  ? ` · ${client.projectRoots.length} parent folders`
+                  : ""}
               </span>
-              {client.projectRoots?.map((root) => <span key={root}>{root}</span>)}
+              {client.projectRoots?.map((root) => (
+                <span key={root}>{root}</span>
+              ))}
             </div>
             <button
               className="tiny danger-text"
@@ -122,7 +125,7 @@ export function AiConnections({
           e.preventDefault();
           void perform(async () =>
             setCredential(
-              await api.createClient(name, projects, control, edit, projectRoots),
+              await api.createClient(name, [], true, true, projectRoots),
             ),
           );
         }}
@@ -138,75 +141,56 @@ export function AiConnections({
           />
         </label>
         <fieldset className="project-grants">
-          <legend>Allowed service folders</legend>
-          {workspace.projects.length ? (
-            workspace.projects.map((p) => (
-              <label key={p.id} title={p.path}>
-                <input
-                  type="checkbox"
-                  checked={projects.includes(p.id)}
-                  onChange={(e) =>
-                    setProjects(
-                      e.target.checked
-                        ? [...projects, p.id]
-                        : projects.filter((id) => id !== p.id),
-                    )
-                  }
-                />
-                {p.name}
-              </label>
-            ))
-          ) : (
-            <p>No service folders open yet. Choose an allowed folder below so AI can create or open working folders.</p>
-          )}
-        </fieldset>
-        <fieldset className="project-grants">
           <legend>Allow creation and opening inside folders</legend>
-          <p>This client will automatically get access to projects it creates or opens inside these folders, using the control and edit permissions selected below. Opening a folder does not run commands.</p>
+          <p>
+            Optional: choose parent folders only if AI should create or open
+            folders that are not registered yet. Existing and future registered
+            services are already accessible with the token. Opening a folder
+            does not run commands.
+          </p>
           {projectRoots.map((root) => (
             <div className="settings-row" key={root}>
               <code>{root}</code>
-              <button type="button" className="icon-button" aria-label={`Remove allowed folder ${root}`} disabled={busy} onClick={() => setProjectRoots((roots) => roots.filter((p) => p !== root))}>
+              <button
+                type="button"
+                className="icon-button"
+                aria-label={`Remove allowed folder ${root}`}
+                disabled={busy}
+                onClick={() =>
+                  setProjectRoots((roots) => roots.filter((p) => p !== root))
+                }
+              >
                 <Icon name="close" size={14} />
               </button>
             </div>
           ))}
-          <button type="button" className="secondary" disabled={busy} onClick={() => {
-            void perform(async () => {
-              const root = await pickProjectFolder("Allow AI to create and open projects inside this folder");
-              if (typeof root === "string") setProjectRoots((roots) => roots.includes(root) ? roots : [...roots, root]);
-            });
-          }}>
+          <button
+            type="button"
+            className="secondary"
+            disabled={busy}
+            onClick={() => {
+              void perform(async () => {
+                const root = await pickProjectFolder(
+                  "Allow AI to create and open projects inside this folder",
+                );
+                if (typeof root === "string")
+                  setProjectRoots((roots) =>
+                    roots.includes(root) ? roots : [...roots, root],
+                  );
+              });
+            }}
+          >
             <Icon name="folder" /> Add allowed folder
           </button>
         </fieldset>
-        <div className="grant-options">
-          <label>
-            <input
-              type="checkbox"
-              checked={control}
-              onChange={(e) => setControl(e.target.checked)}
-            />
-            Run, stop and restart trusted services
-          </label>
-          <label>
-            <input
-              type="checkbox"
-              checked={edit}
-              onChange={(e) => setEdit(e.target.checked)}
-            />
-            Add and edit executable commands
-          </label>
-        </div>
-        {edit && (
-          <p className="warning-banner">
-            Edit permission lets this client change commands that run with your
-            user permissions. Only grant this to a client you trust.
-          </p>
-        )}
+        <p className="warning-banner">
+          This token can edit and execute commands with your user permissions
+          across the entire workspace. Share it only with clients you trust.
+          Existing tokens have the same access.
+        </p>
         <button
           className="primary"
-          disabled={busy || !workspace.ai.enabled || (!projects.length && !projectRoots.length)}
+          disabled={busy || !workspace.ai.enabled || !name.trim()}
         >
           <Icon name="plus" />
           Create profile & proxy
@@ -244,13 +228,45 @@ export function AiConnections({
           </label>
           <details>
             <summary>Codex MCP settings</summary>
-            <p>Paste into your private Codex config.toml, then reconnect. This contains your token.</p>
-            <textarea aria-label="Codex MCP configuration" className="mono" readOnly rows={5} value={`[mcp_servers.service_manager]\nurl = ${JSON.stringify(workspace.ai.endpoint)}\nhttp_headers = { Authorization = ${JSON.stringify(`Bearer ${credential.token}`)} }`} onFocus={(e) => e.target.select()} />
+            <p>
+              Paste into your private Codex config.toml, then reconnect. This
+              contains your token.
+            </p>
+            <textarea
+              aria-label="Codex MCP configuration"
+              className="mono"
+              readOnly
+              rows={5}
+              value={`[mcp_servers.service_manager]\nurl = ${JSON.stringify(workspace.ai.endpoint)}\nhttp_headers = { Authorization = ${JSON.stringify(`Bearer ${credential.token}`)} }`}
+              onFocus={(e) => e.target.select()}
+            />
           </details>
           <details>
             <summary>Claude Code MCP settings</summary>
-            <p>Merge into your private MCP settings, then reconnect. Claude Code must be logged in.</p>
-            <textarea aria-label="Claude Code MCP configuration" className="mono" readOnly rows={12} value={JSON.stringify({mcpServers: {service_manager: {type: "http", url: workspace.ai.endpoint, headers: {Authorization: `Bearer ${credential.token}`}}}}, null, 2)} onFocus={(e) => e.target.select()} />
+            <p>
+              Merge into your private MCP settings, then reconnect. Claude Code
+              must be logged in.
+            </p>
+            <textarea
+              aria-label="Claude Code MCP configuration"
+              className="mono"
+              readOnly
+              rows={12}
+              value={JSON.stringify(
+                {
+                  mcpServers: {
+                    service_manager: {
+                      type: "http",
+                      url: workspace.ai.endpoint,
+                      headers: { Authorization: `Bearer ${credential.token}` },
+                    },
+                  },
+                },
+                null,
+                2,
+              )}
+              onFocus={(e) => e.target.select()}
+            />
           </details>
           <p>
             Use the proxy through your AI's shell tool to receive service logs
