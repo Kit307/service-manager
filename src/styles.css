@@ -1096,8 +1096,13 @@ label small {
   }
 }
 
-.credential details { margin-top: 16px; }
-.credential summary { cursor: pointer; font-weight: 600; }
+.credential details {
+  margin-top: 16px;
+}
+.credential summary {
+  cursor: pointer;
+  font-weight: 600;
+}
 .credential textarea {
   width: 100%;
   resize: vertical;
@@ -1107,4 +1112,112 @@ label small {
   background: var(--surface);
   color: var(--ink);
 }
-.credential textarea:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+.credential textarea:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+.workspace-group {
+  margin-bottom: 10px;
+}
+.group-header .project-row {
+  padding-left: 2px;
+  min-width: 0;
+}
+.group-header .project-row > span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.group-count {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 11px;
+}
+.group-members {
+  margin-left: 8px;
+  border-left: 1px solid var(--line);
+}
+.group-members .service-row {
+  padding-left: 14px;
+}
+.disclosure {
+  flex-shrink: 0;
+}
+.sidebar-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.workspace-overview {
+  padding: 30px 32px;
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
+}
+.overview-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+}
+.overview-heading h1 {
+  font-size: 28px;
+  margin: 8px 0 20px;
+  overflow-wrap: anywhere;
+}
+.overview-heading h2 {
+  font-size: 15px;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.group-actions {
+  flex-wrap: wrap;
+  margin: 10px 0;
+}
+.overview-note,
+.empty-inline {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.empty-inline {
+  padding: 8px 12px;
+}
+.group-service-list {
+  display: grid;
+  gap: 12px;
+  margin-top: 22px;
+}
+.group-service-card {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  padding: 18px;
+}
+.group-service-card code {
+  display: block;
+  margin-top: 14px;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.working-path,
+.editor-root {
+  color: var(--muted);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.editor-root {
+  padding: 0 32px;
+}
+.group-editor h1 {
+  font-size: 24px;
+}
+.group-editor > p {
+  color: var(--muted);
+  line-height: 1.6;
+}
+.group-editor small {
+  display: block;
+  overflow-wrap: anywhere;
+}

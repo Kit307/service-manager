@@ -1,4 +1,10 @@
-use crate::{logs::LogPage, manager::Manager, mcp::AiBridge, model::*, project::Project};
+use crate::{
+    logs::LogPage,
+    manager::Manager,
+    mcp::AiBridge,
+    model::*,
+    project::{Project, ServiceRef, WorkspaceGroup},
+};
 use serde_json::{json, Value};
 use std::sync::{
     atomic::{AtomicBool, Ordering},
@@ -15,9 +21,32 @@ pub struct DesktopState {
 }
 #[tauri::command]
 async fn workspace(state: State<'_, DesktopState>) -> Result<Value> {
+    let projects = state.manager.projects().await;
+    let store = state.manager.store.lock().await;
+    let groups = store.private.groups.clone();
+    let unclean = store.unclean;
+    drop(store);
     Ok(
-        json!({"projects":state.manager.projects().await,"ai":state.ai.status().await,"uncleanShutdown":state.manager.store.lock().await.unclean}),
+        json!({"projects":projects,"groups":groups,"ai":state.ai.status().await,"uncleanShutdown":unclean}),
     )
+}
+#[tauri::command]
+async fn save_group(
+    state: State<'_, DesktopState>,
+    id: Option<String>,
+    name: String,
+    services: Vec<ServiceRef>,
+) -> Result<WorkspaceGroup> {
+    state
+        .manager
+        .store
+        .lock()
+        .await
+        .save_group(id.as_deref(), &name, services)
+}
+#[tauri::command]
+async fn remove_group(state: State<'_, DesktopState>, id: String) -> Result<()> {
+    state.manager.store.lock().await.remove_group(&id)
 }
 #[tauri::command]
 async fn open_project(state: State<'_, DesktopState>, path: String) -> Result<Project> {
@@ -209,8 +238,9 @@ pub fn run() {
                     let mut projects: Vec<_> = store.projects.values().cloned().collect();
                     projects.sort_by(|a, b| a.name.cmp(&b.name));
                     let unclean = store.unclean;
+                    let groups = store.private.groups.clone();
                     drop(store);
-                    let data = json!({"projects": projects, "ai": state.ai.status().await, "uncleanShutdown": unclean});
+                    let data = json!({"projects": projects, "groups": groups, "ai": state.ai.status().await, "uncleanShutdown": unclean});
                     let revision = crate::project::hash(&serde_json::to_vec(&data).unwrap_or_default());
                     if revision != previous { let _ = handle.emit("workspace-changed", data); previous = revision; }
                     let seq = state.manager.logs.lock().await.revision();
@@ -248,6 +278,8 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             workspace,
+            save_group,
+            remove_group,
             open_project,
             remove_project,
             save_service,

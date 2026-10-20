@@ -1,3 +1,11 @@
+# Service Manager 0.4.0 verification
+
+- React: 18 behavior tests cover the direct Group → Service navigation, persisted disclosure, group creation/removal/error handling, scoped bulk controls, cancellation of the second trust review, stale reviewed revisions, partial lifecycle errors and existing editor/log/AI configuration behaviors.
+- Rust: 26 passing tests cover group persistence, single membership across different roots with duplicate service IDs, preservation of configuration bytes and runtime snapshots, rejected members/names, failed-write rollback, membership cleanup, legacy state, and existing config/lifecycle/log/MCP boundaries. One opt-in Docker integration test remains ignored in this run.
+- Frontend production build/typecheck, ESLint and Clippy with warnings denied passed. Final packaging and formatting evidence is in `.agents/evidence/TASK-0009/verification.md`.
+- Browser preview used synthetic services only. Group selection, collapse/expand, settings and absence of horizontal document overflow at 1180 × 897 were checked. Screenshot capture timed out, so no new screenshot or native GUI behavior is certified for this version.
+- No installed application replacement, real service restart, credential/grant change, model-session invocation, signing or notarization was performed. The existing native lifecycle/MCP integration tests use disposable fixtures. The previous native/real-client checks below are historical and were not repeated for v0.4.0.
+
 # Service Manager 0.2.0 verification
 
 ## Implemented and exercised

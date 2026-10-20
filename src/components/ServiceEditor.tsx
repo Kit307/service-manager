@@ -148,7 +148,7 @@ export function ServiceEditor({
           onChange={(e) => setCwd(e.target.value)}
         />
         <small>
-          Relative to the project folder. Use a dot for the project root.
+          Relative to the working folder above. Use a dot for its root.
         </small>
       </label>
       <div className="form-row">
@@ -160,7 +160,7 @@ export function ServiceEditor({
             placeholder=".env.local"
             onChange={(e) => setEnvFile(e.target.value)}
           />
-          <small>Path relative to project root. Its contents stay local.</small>
+          <small>Path relative to the working folder. Its contents stay local.</small>
         </label>
         <label>
           Health check <span className="optional">optional</span>

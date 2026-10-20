@@ -34,6 +34,21 @@ pub struct PrivateState {
     pub dirty: bool,
     #[serde(default)]
     pub compose_owners: HashMap<String, String>,
+    #[serde(default)]
+    pub groups: Vec<WorkspaceGroup>,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceGroup {
+    pub id: String,
+    pub name: String,
+    pub services: Vec<ServiceRef>,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ServiceRef {
+    pub project_id: String,
+    pub service_id: String,
 }
 pub struct ProjectStore {
     pub state_dir: PathBuf,
@@ -165,12 +180,101 @@ impl ProjectStore {
         Ok(store)
     }
     pub fn persist(&self) -> Result<()> {
+        self.write_private(&self.private)
+    }
+    fn write_private(&self, private: &PrivateState) -> Result<()> {
         secure_write(
             &self.state_dir.join("state.json"),
-            &serde_json::to_vec_pretty(&self.private).map_err(|_| {
+            &serde_json::to_vec_pretty(private).map_err(|_| {
                 AppError::new("IO_ERROR", "Could not serialize application settings.")
             })?,
         )
+    }
+    pub fn save_group(
+        &mut self,
+        id: Option<&str>,
+        name: &str,
+        services: Vec<ServiceRef>,
+    ) -> Result<WorkspaceGroup> {
+        let name = name.trim();
+        if name.is_empty()
+            || name.chars().count() > 80
+            || self
+                .private
+                .groups
+                .iter()
+                .any(|g| Some(g.id.as_str()) != id && g.name.to_lowercase() == name.to_lowercase())
+        {
+            return Err(AppError::new(
+                "CONFIG_INVALID",
+                "Choose a unique group name between 1 and 80 characters.",
+            ));
+        }
+        if id.is_some_and(|id| !self.private.groups.iter().any(|g| g.id == id)) {
+            return Err(AppError::new(
+                "GROUP_NOT_FOUND",
+                "This group no longer exists.",
+            ));
+        }
+        if !services.iter().all(|s| {
+            self.projects
+                .get(&s.project_id)
+                .is_some_and(|p| p.config.services.iter().any(|d| d.id == s.service_id))
+        }) {
+            return Err(AppError::new(
+                "SERVICE_NOT_FOUND",
+                "Only registered services can be added to a group.",
+            ));
+        }
+        let mut members = Vec::new();
+        for service in services {
+            if !members.contains(&service) {
+                members.push(service);
+            }
+        }
+        let group = WorkspaceGroup {
+            id: id
+                .map(str::to_owned)
+                .unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
+            name: name.into(),
+            services: members,
+        };
+        let mut next = self.private.clone();
+        for other in &mut next.groups {
+            other.services.retain(|s| !group.services.contains(s));
+        }
+        if let Some(existing) = next.groups.iter_mut().find(|g| g.id == group.id) {
+            *existing = group.clone();
+        } else {
+            next.groups.push(group.clone());
+        }
+        self.write_private(&next)?;
+        self.private = next;
+        Ok(group)
+    }
+    pub fn remove_service_from_groups(&mut self, project: &str, service: &str) -> Result<()> {
+        let mut next = self.private.clone();
+        for group in &mut next.groups {
+            group
+                .services
+                .retain(|s| s.project_id != project || s.service_id != service);
+        }
+        self.write_private(&next)?;
+        self.private = next;
+        Ok(())
+    }
+    pub fn remove_group(&mut self, id: &str) -> Result<()> {
+        if !self.private.groups.iter().any(|g| g.id == id) {
+            return Err(AppError::new(
+                "GROUP_NOT_FOUND",
+                "This group no longer exists.",
+            ));
+        }
+        let mut next = self.private.clone();
+        next.groups.retain(|g| g.id != id);
+        self.write_private(&next)?;
+        self.private = next;
+        Ok(())
     }
     pub fn open(&mut self, path: &str) -> Result<Project> {
         let root = Path::new(path).canonicalize()?;
@@ -307,6 +411,9 @@ impl ProjectStore {
         let previous = self.private.clone();
         self.private.projects.remove(id);
         self.private.trust.remove(id);
+        for group in &mut self.private.groups {
+            group.services.retain(|service| service.project_id != id);
+        }
         let prefix = format!("{id}/");
         self.private
             .compose_owners

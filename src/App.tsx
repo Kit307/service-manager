@@ -8,6 +8,8 @@ import {
 } from "./lib/api";
 import {
   stopped,
+  serviceActive,
+  type ServiceRef,
   type LogRecord,
   type Project,
   type ServiceDefinition,
@@ -18,8 +20,19 @@ import { ServiceEditor } from "./components/ServiceEditor";
 import { LogPanel } from "./components/LogPanel";
 import { AiConnections } from "./components/AiConnections";
 
+import { ServiceSidebar } from "./components/ServiceSidebar";
+import { GroupEditor } from "./components/GroupEditor";
+import { GroupOverview, type ActionResult } from "./components/GroupOverview";
+import {
+  entries,
+  refKey,
+  serviceRef,
+  type ServiceEntry,
+} from "./lib/workspace";
+
 const initial: Workspace = {
   projects: [],
+  groups: [],
   ai: { enabled: false, endpoint: "http://127.0.0.1:47831/mcp", clients: [] },
   uncleanShutdown: false,
 };
@@ -35,9 +48,11 @@ export default function App() {
   const [workspace, setWorkspace] = useState(initial);
   const [projectId, setProjectId] = useState("");
   const [serviceId, setServiceId] = useState("");
-  const [view, setView] = useState<"service" | "new" | "settings" | "ai">(
-    "service",
-  );
+  const [view, setView] = useState<
+    "workspace" | "group-settings" | "service" | "new" | "settings" | "ai"
+  >("workspace");
+  const [groupId, setGroupId] = useState("");
+  const [results, setResults] = useState<ActionResult[]>([]);
   const [busy, setBusy] = useState(false);
   const [draftRevision, setDraftRevision] = useState("absent");
   const [error, setError] = useState("");
@@ -46,6 +61,12 @@ export default function App() {
   const [theme, setTheme] = useState(
     () => window.localStorage.getItem("appearance") || "system",
   );
+  const allServices = entries(workspace.projects);
+  const group = workspace.groups.find((g) => g.id === groupId);
+  const members = new Set(group?.services.map(refKey));
+  const visibleServices = group
+    ? allServices.filter((e) => members.has(refKey(serviceRef(e))))
+    : allServices;
   const project = workspace.projects.find((p) => p.id === projectId);
   const service = project?.config.services.find((s) => s.id === serviceId);
   const snapshot = project?.runtime[serviceId] ?? stopped;
@@ -80,7 +101,11 @@ export default function App() {
       return () => {
         live = false;
       };
-    const subscription = api.onWorkspace((data) => { if (live) setWorkspace(data); }).catch(() => () => {});
+    const subscription = api
+      .onWorkspace((data) => {
+        if (live) setWorkspace(data);
+      })
+      .catch(() => () => {});
     return () => {
       live = false;
       void subscription.then((unsubscribe) => unsubscribe());
@@ -98,7 +123,10 @@ export default function App() {
     let retry: ReturnType<typeof setTimeout> | undefined;
     const update = async () => {
       if (!projectId || !serviceId || !live || !isDesktop()) return;
-      if (inFlight) { pending = true; return; }
+      if (inFlight) {
+        pending = true;
+        return;
+      }
       inFlight = true;
       pending = false;
       try {
@@ -116,7 +144,13 @@ export default function App() {
             ].slice(-1000);
             let bytes = 0;
             let start = combined.length;
-            while (start > 0 && bytes + combined[start - 1].text.length * 3 + 160 <= 2 * 1024 * 1024) { bytes += combined[--start].text.length * 3 + 160; }
+            while (
+              start > 0 &&
+              bytes + combined[start - 1].text.length * 3 + 160 <=
+                2 * 1024 * 1024
+            ) {
+              bytes += combined[--start].text.length * 3 + 160;
+            }
             return combined.slice(start);
           });
         }
@@ -124,11 +158,22 @@ export default function App() {
         if (live) setError(errorMessage(e));
       } finally {
         inFlight = false;
-        if (live && pending) { clearTimeout(retry); retry = setTimeout(() => { void update(); }, 100); }
+        if (live && pending) {
+          clearTimeout(retry);
+          retry = setTimeout(() => {
+            void update();
+          }, 100);
+        }
       }
     };
     void update();
-    const subscription = isDesktop() ? api.onLogs(() => { void update(); }).catch(() => () => {}) : Promise.resolve(() => {});
+    const subscription = isDesktop()
+      ? api
+          .onLogs(() => {
+            void update();
+          })
+          .catch(() => () => {})
+      : Promise.resolve(() => {});
     return () => {
       live = false;
       clearTimeout(retry);
@@ -142,6 +187,12 @@ export default function App() {
       setLogs([]);
       setGap(false);
     }
+    if (next)
+      setGroupId(
+        workspace.groups.find((g) =>
+          g.services.some((s) => s.projectId === p.id && s.serviceId === next),
+        )?.id ?? "",
+      );
     setProjectId(p.id);
     setServiceId(next);
     setView("service");
@@ -165,32 +216,99 @@ export default function App() {
       setBusy(false);
     }
   }
-  async function openFolder() {
+  function overview(id = groupId) {
+    setGroupId(id);
+    setView("workspace");
+    setResults([]);
+    setError("");
+    setProjectId("");
+    setServiceId("");
+    setLogs([]);
+    setGap(false);
+  }
+  async function addService() {
     await perform(async () => {
-      const path = await pickProjectFolder();
+      const path = await pickProjectFolder("Choose a service working folder");
       if (path) {
         const p = await api.openProject(path);
-        select(p);
+        select(p, "");
+        beginEdit("new", p);
       }
+    });
+  }
+  async function review(
+    targets: ServiceEntry[],
+    action: "start" | "stop" | "restart",
+  ) {
+    if (action === "stop") return true;
+    const untrusted = targets.filter(
+      ({ project: p, service: s }) => !p.trusted.includes(s.id),
+    );
+    for (const { project: p, service: s } of untrusted) {
+      const command =
+        s.type === "command" ? s.command : `Docker Compose: ${s.file}`;
+      if (
+        !(await confirmAction(
+          `Trust and run this service?\n\n${command}\n\nFolder: ${p.path}/${s.cwd}\n\nThis command runs with your user permissions.`,
+          "Trust this service?",
+        ))
+      )
+        return false;
+    }
+    for (const { project: p, service: s } of untrusted)
+      await api.trustService(p.id, s.id, p.revision);
+    return true;
+  }
+  async function bulk(action: "start" | "stop" | "restart") {
+    const targets = visibleServices.filter(
+      ({ project: p, service: s }) =>
+        action === "restart" ||
+        (action === "stop"
+          ? serviceActive(p.runtime[s.id]?.state)
+          : !serviceActive(p.runtime[s.id]?.state)),
+    );
+    await perform(async () => {
+      setResults([]);
+      if (!(await review(targets, action))) return;
+      const settled = await Promise.allSettled(
+        targets.map(({ project: p, service: s }) =>
+          api.control(p.id, s.id, action),
+        ),
+      );
+      setResults(
+        settled.map((result, i) => ({
+          key: refKey(serviceRef(targets[i])),
+          ...(result.status === "rejected"
+            ? { error: errorMessage(result.reason) }
+            : {}),
+        })),
+      );
+    });
+  }
+  async function saveGroup(name: string, services: ServiceRef[]) {
+    await perform(async () => {
+      const saved = await api.saveGroup(group?.id, name, services);
+      overview(saved.id);
+    });
+  }
+  async function removeGroup() {
+    if (
+      !group ||
+      !(await confirmAction(
+        `Remove “${group.name}”? Its services will remain available under Ungrouped. No code files will be deleted.`,
+        "Remove group?",
+      ))
+    )
+      return;
+    await perform(async () => {
+      await api.removeGroup(group.id);
+      overview("");
     });
   }
   async function control(action: "start" | "stop" | "restart") {
     if (!project || !service) return;
     await perform(async () => {
-      if (action !== "stop" && !project.trusted.includes(service.id)) {
-        const command =
-          service.type === "command"
-            ? service.command
-            : `Docker Compose: ${service.file}`;
-        if (
-          !(await confirmAction(
-            `Trust and run this service?\n\n${command}\n\nFolder: ${project.path}/${service.cwd}\n\nThis command runs with your user permissions. Opening a project never grants trust automatically.`,
-            "Trust this service?",
-          ))
-        )
-          return;
-        await api.trustService(project.id, service.id, project.revision);
-      }
+      if (!(await review([{ project, service }], action))) return;
       await api.control(project.id, service.id, action);
     });
   }
@@ -205,6 +323,20 @@ export default function App() {
       setProjectId(saved.id);
       setServiceId(definition.id);
       setView("service");
+      if (view === "new" && group) {
+        try {
+          await api.saveGroup(group.id, group.name, [
+            ...group.services,
+            { projectId: saved.id, serviceId: definition.id },
+          ]);
+        } catch (e) {
+          await refresh();
+          throw new Error(
+            `Service saved, but could not add it to the group: ${errorMessage(e)}`,
+            { cause: e },
+          );
+        }
+      }
     });
   }
   async function remove() {
@@ -212,120 +344,55 @@ export default function App() {
       !project ||
       !service ||
       !(await confirmAction(
-        `Remove “${service.name}” from this project's configuration? No project files will be deleted.`,
+        `Remove “${service.name}” from Service Manager? No code files will be deleted.`,
         "Remove service?",
       ))
     )
       return;
     await perform(async () => {
       await api.remove(project.id, service.id, project.revision);
-      const data = await refresh();
-      const p = data.projects.find((p) => p.id === project.id);
-      if (p) select(p);
-    });
-  }
-
-  async function removeProject(p: Project) {
-    const composeNote = p.config.services.some((s) => s.type === "compose")
-      ? "\n\nDocker containers and volumes will be kept. Opening this folder again creates a new managed stack; existing Docker data is not reused automatically."
-      : "";
-    if (!(await confirmAction(
-      `Remove “${p.name}” from Service Manager?\n\nYour code folder and saved service configuration will be kept. You can open the folder again later. Unsaved edits to this project will be discarded.${composeNote}`,
-      "Remove project?",
-    ))) return;
-    await perform(async () => {
-      await api.removeProject(p.id);
-      const data = await refresh();
-      if (projectId === p.id) {
-        if (data.projects[0]) select(data.projects[0]);
-        else {
-          setProjectId("");
-          setServiceId("");
-          setLogs([]);
-          setGap(false);
-          setView("service");
-        }
-      }
+      overview();
     });
   }
 
   return (
     <div className="app-shell">
-      <aside className="sidebar" aria-label="Projects and services">
+      <aside className="sidebar" aria-label="Services">
         <div className="brand">
           <span className="brand-mark">
             <Icon name="terminal" size={18} />
           </span>
           <span>Service Manager</span>
-          <span className="version">0.3</span>
+          <span className="version">0.4</span>
         </div>
         <button
           className="open-folder"
           onClick={() => {
-            void openFolder();
+            void addService();
           }}
           disabled={busy}
         >
           <Icon name="folder" />
-          Open Folder<span className="shortcut">↗</span>
+          Add service<span className="shortcut">↗</span>
         </button>
-        <div className="sidebar-label">
-          Workspace<span>{workspace.projects.length}</span>
-        </div>
-        <nav className="project-tree">
-          {workspace.projects.map((p) => (
-            <div className="project-group" key={p.id}>
-              <div className="project-header">
-              <button
-                className={`project-row ${projectId === p.id && view !== "ai" ? "current" : ""}`}
-                onClick={() => select(p)}
-                title={p.path}
-              >
-                <Icon
-                  name="chevron"
-                  size={12}
-                  style={{ transform: "rotate(90deg)" }}
-                />
-                <Icon name="folder" size={15} />
-                <span>{p.name}</span>
-              </button>
-              <button
-                className="icon-button remove-project"
-                aria-label={`Remove project ${p.name}`}
-                title={Object.values(p.runtime).some((s) => ["starting", "running", "ready", "stopping"].includes(s.state)) ? "Stop all services before removing this project" : "Remove project from Service Manager"}
-                disabled={busy || Object.values(p.runtime).some((s) => ["starting", "running", "ready", "stopping"].includes(s.state))}
-                onClick={() => { void removeProject(p); }}
-              >
-                <Icon name="close" size={14} />
-              </button>
-              </div>
-              {p.config.services.map((s) => {
-                const state = p.runtime[s.id]?.state ?? "stopped";
-                return (
-                  <button
-                    key={s.id}
-                    className={`service-row ${projectId === p.id && serviceId === s.id && view === "service" ? "selected" : ""}`}
-                    onClick={() => select(p, s.id)}
-                  >
-                    <span className={`status-dot ${state}`} />
-                    <span>{s.name}</span>
-                    <span className="service-type">{labels[state]}</span>
-                  </button>
-                );
-              })}
-              <button
-                className="add-service-row"
-                onClick={() => {
-                  select(p);
-                  beginEdit("new", p);
-                }}
-              >
-                <Icon name="plus" size={13} />
-                Add service
-              </button>
-            </div>
-          ))}
-        </nav>
+        <ServiceSidebar
+          services={allServices}
+          groups={workspace.groups}
+          selected={
+            view === "service" || view === "settings"
+              ? refKey({ projectId, serviceId })
+              : ""
+          }
+          groupId={view === "workspace" ? groupId : "__other"}
+          busy={busy}
+          onService={({ project: p, service: s }) => select(p, s.id)}
+          onGroup={overview}
+          onEdit={(id) => {
+            setGroupId(id);
+            setView("group-settings");
+            setError("");
+          }}
+        />
         <div className="sidebar-bottom">
           <button
             className={`ai-nav ${view === "ai" ? "selected" : ""}`}
@@ -370,9 +437,9 @@ export default function App() {
             <span>
               {view === "ai"
                 ? "AI Connections"
-                : (project?.name ?? "Workspace")}
+                : (group?.name ?? "All services")}
             </span>
-            {service && view !== "ai" && (
+            {service && (view === "service" || view === "settings") && (
               <>
                 <span className="slash">/</span>
                 <span className="breadcrumb-current">{service.name}</span>
@@ -408,44 +475,38 @@ export default function App() {
             onRefresh={refresh}
             onError={(e) => setError(errorMessage(e))}
           />
-        ) : !project ? (
-          <section className="welcome">
-            <div className="welcome-icon">
-              <Icon name="folder" size={30} />
-            </div>
-            <p className="welcome-kicker">A workspace for what you run.</p>
-            <h1>
-              Your services.
-              <br />
-              One place to run them.
-            </h1>
-            <p>
-              Open a code folder, add your commands,
-              <br />
-              and keep every service and its output in view.
-            </p>
-            <button
-              className="primary large"
-              onClick={() => {
-                void openFolder();
-              }}
-              disabled={busy}
-            >
-              <Icon name="folder" />
-              Open Folder
-            </button>
-            <span className="safe-note">
-              <Icon name="shield" size={13} />
-              Opening a folder never runs its commands.
-            </span>
-            {!isDesktop() && (
-              <span className="browser-note">
-                Native folder access is available in the desktop app.
-              </span>
-            )}
-          </section>
+        ) : view === "group-settings" ? (
+          <GroupEditor
+            key={groupId || "new-group"}
+            group={group}
+            groups={workspace.groups}
+            services={allServices}
+            busy={busy}
+            onSave={(name, refs) => {
+              void saveGroup(name, refs);
+            }}
+            onRemove={() => {
+              void removeGroup();
+            }}
+            onCancel={() => overview()}
+          />
+        ) : view === "workspace" || !project ? (
+          <GroupOverview
+            name={group?.name ?? "All services"}
+            services={visibleServices}
+            busy={busy}
+            results={results}
+            onControl={(action) => {
+              void bulk(action);
+            }}
+            onService={({ project: p, service: s }) => select(p, s.id)}
+            onAdd={() => {
+              void addService();
+            }}
+          />
         ) : view === "new" || view === "settings" ? (
           <div className="editor-scroll">
+            <p className="editor-root">Working folder: {project.path}</p>
             <ServiceEditor
               key={view === "new" ? `new-${project.id}` : serviceId}
               service={view === "settings" ? service : undefined}
@@ -453,7 +514,7 @@ export default function App() {
               onSave={(d) => {
                 void save(d);
               }}
-              onCancel={() => setView("service")}
+              onCancel={() => (service ? setView("service") : overview())}
               onRemove={
                 view === "settings" && service && !active
                   ? () => {
@@ -463,30 +524,7 @@ export default function App() {
               }
             />
           </div>
-        ) : !service ? (
-          <section className="welcome project-empty">
-            <span className="welcome-icon">
-              <Icon name="terminal" size={30} />
-            </span>
-            <h1>
-              What does this
-              <br />
-              project run?
-            </h1>
-            <p>
-              Add a frontend, an API, or a Compose stack.
-              <br />
-              Your commands stay with this project.
-            </p>
-            <button className="primary large" onClick={() => beginEdit("new")}>
-              <Icon name="plus" />
-              Add your first service
-            </button>
-            <span className="safe-note">
-              Configuration saves to .service-manager/project.json
-            </span>
-          </section>
-        ) : (
+        ) : !service ? null : (
           <>
             <section className="service-summary">
               <div className="service-heading">
@@ -510,7 +548,7 @@ export default function App() {
                         ? "Docker Compose"
                         : "Shell command"}
                       <span>·</span>
-                      {service.cwd === "." ? "Project root" : service.cwd}
+                      {`${project.path}/${service.cwd}`}
                       {snapshot.pid && (
                         <>
                           <span>·</span>PID {snapshot.pid}

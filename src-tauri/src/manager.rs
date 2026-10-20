@@ -83,7 +83,7 @@ impl Manager {
         }
         p.config.services.retain(|s| s.id != service);
         store.save(project, p.config, revision)?;
-        Ok(())
+        store.remove_service_from_groups(project, service)
     }
     pub async fn status(&self, project: &str, service: &str) -> Result<Snapshot> {
         let store = self.store.lock().await;

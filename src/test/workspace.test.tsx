@@ -9,6 +9,7 @@ import type { Workspace } from "../lib/types";
 
 function fixture(revision = "revision-a"): Workspace {
   return {
+    groups: [],
     projects: [
       {
         id: "p1",
@@ -61,10 +62,10 @@ describe("workspace interactions", () => {
     const user = userEvent.setup();
     render(<App />);
     await user.click(
-      await screen.findByRole("button", { name: "Fixture project" }),
+      await screen.findByRole("button", { name: "Frontend Stopped" }),
     );
     await screen.findByText("retained-fixture-line");
-    await user.click(screen.getByRole("button", { name: "Fixture project" }));
+    await user.click(screen.getByRole("button", { name: "Frontend Stopped" }));
     expect(screen.getByText("retained-fixture-line")).toBeVisible();
   });
   it("keeps the original editor revision when background refresh observes an external edit", async () => {
@@ -86,7 +87,7 @@ describe("workspace interactions", () => {
     const user = userEvent.setup();
     render(<App />);
     await user.click(
-      await screen.findByRole("button", { name: "Fixture project" }),
+      await screen.findByRole("button", { name: "Frontend Stopped" }),
     );
     await user.click(screen.getByRole("button", { name: "Edit service" }));
     await user.clear(screen.getByLabelText("Service name"));
@@ -107,10 +108,12 @@ describe("workspace interactions", () => {
   });
   it("never offers removal of an existing service in the new-service form", async () => {
     vi.spyOn(native.api, "workspace").mockResolvedValue(fixture());
+    vi.spyOn(native, "pickProjectFolder").mockResolvedValue("/isolated-fixture");
+    vi.spyOn(native.api, "openProject").mockResolvedValue(fixture().projects[0]);
     const user = userEvent.setup();
     render(<App />);
     await user.click(
-      await screen.findByRole("button", { name: "Add service" }),
+      (await screen.findAllByRole("button", { name: "Add service" }))[0],
     );
     expect(
       screen.getByRole("heading", { name: "Add a service" }),

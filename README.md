@@ -2,7 +2,7 @@
 
 A desktop app for running project services without typing commands in a terminal.
 
-Version 0.3.0 implements the local desktop workflow: command and owned Docker Compose services, project configuration, live logs, loopback health checks, and authenticated MCP/proxy access share one Rust manager. This is a local macOS development release without Developer ID signing or notarization.
+Version 0.4.0 implements the local desktop workflow: command and owned Docker Compose services, project configuration, live logs, loopback health checks, and authenticated MCP/proxy access share one Rust manager. This is a local macOS development release without Developer ID signing or notarization.
 
 ## Selected stack
 
@@ -12,14 +12,14 @@ Version 0.3.0 implements the local desktop workflow: command and owned Docker Co
 
 ## Agreed workflow
 
-1. Open a project folder.
-2. Load its saved service configuration, or add a service and its run command.
-3. Run, stop, or restart services and view live logs.
-4. Reopen the folder to restore its saved configuration.
+1. Choose Add service and select its working folder. Existing services in that folder appear automatically.
+2. Add a command or Compose definition.
+3. Organize services directly into virtual groups, or leave them ungrouped.
+4. Open a group to Run all, Stop all or Restart all; select any service for live logs. Groups and disclosure state survive reopening the app.
 5. Let Codex and Claude use MCP to manage registered services and read their logs.
 6. Let AI shell tools call a proxy script that starts a registered service through the same manager and forwards its logs to the tool output.
 
-Each project can contain multiple services with different working directories and commands, including Go, Node.js, and Docker Compose.
+Services may use different working folders and commands, including Go, Node.js, and Docker Compose. The UI uses Group → Service directly; existing project identities remain internally for configuration, process ownership and MCP compatibility. Existing service definitions, trust records and working roots are preserved.
 
 See [the design](docs/superpowers/specs/2026-10-16-service-manager-design.md) for behavior and implementation boundaries.
 
@@ -27,15 +27,15 @@ The [implementation plan](docs/superpowers/plans/2026-10-16-service-manager-plan
 
 ## Use the desktop app
 
-AI Connections can bootstrap an empty workspace: select an allowed parent folder when creating a client profile. MCP can then discover its allowed roots, create new empty project folders, or open existing code folders itself. Each project appears in the same app; control/edit permissions stay separate and nothing runs automatically. See [AI connections](docs/ai-connections.md).
+AI Connections can bootstrap an empty workspace: select an allowed parent folder when creating a client profile. MCP can then discover its allowed roots, create new empty project folders, or open existing code folders itself. Its configured services appear directly in the same app; control/edit permissions stay separate and nothing runs automatically. See [AI connections](docs/ai-connections.md).
 
-Window minimization is disabled; manual resizing remains available and startup uses the normal window size. Open Service Manager, choose Open Folder, and add a command or Docker Compose service. Save the definition, review it on Run, and approve its exact configuration before first execution. Settings and commands persist in `.service-manager/project.json`. Existing malformed files are preserved and reported as errors.
+Window minimization is disabled; manual resizing remains available and startup uses the normal window size. Open Service Manager, choose Add service, select its working folder, and add a command or Docker Compose service. Save the definition, review it on Run, and approve its exact configuration before first execution. Settings and commands persist in `.service-manager/project.json`. Existing malformed files are preserved and reported as errors.
 
 Run supports foreground noninteractive commands such as `pnpm dev` and `go run ./cmd/api`. Stop signals the owned process group, escalates after five seconds, and waits for cleanup. Opening a folder does not execute anything. Running and Ready remain different states; configure a loopback health check to establish readiness.
 
-Use the × button beside a project name to remove it from Service Manager. Stop all of its services first, then confirm removal. The code folder and `.service-manager/project.json` remain on disk; Open Folder restores the saved services. Reopened projects require fresh service trust and AI access grants. Removal only changes the app's workspace list and private trust records.
+Use New group or a group's settings to create, rename or remove a group and select its services. Selecting a service moves it from its previous group. Removing a group keeps its services under Ungrouped and never touches code or running processes. Grouping does not change AI permissions.
 
-For Compose projects, removal preserves Docker containers and volumes. Reopening creates a new managed stack with a new ownership identity; existing Docker data is not reused automatically. The removal dialog explains this before confirmation.
+Run all skips active services; Stop all and Restart all affect only the services in the selected view. All services applies to the entire workspace. All required trust reviews finish before any batch lifecycle action is submitted; canceling prevents the batch. Results are reported per service, and accepted requests do not imply Ready. Services start independently without dependency ordering. Remove a stopped service through its Settings; this removes its definition and group membership, preserving source files.
 
 Closing the window hides it. Use the menu/tray or Dock to reopen it. Quit asks to stop active services first and blocks new starts while cleanup is in progress. Commands run with your normal user permissions; the application is not a sandbox for untrusted repositories. Deliberately detached children and abrupt OS/app termination are outside guaranteed cleanup.
 

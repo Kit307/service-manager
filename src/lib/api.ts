@@ -7,6 +7,8 @@ import type {
   Project,
   ServiceDefinition,
   Workspace,
+  WorkspaceGroup,
+  ServiceRef,
 } from "./types";
 
 export const isDesktop = () => "__TAURI_INTERNALS__" in window;
@@ -34,13 +36,15 @@ export async function pickProjectFolder(title = "Open a code folder") {
   });
 }
 export const api = {
-  onWorkspace: (callback: (workspace: Workspace) => void) => listen<Workspace>("workspace-changed", (event) => callback(event.payload)),
+  onWorkspace: (callback: (workspace: Workspace) => void) =>
+    listen<Workspace>("workspace-changed", (event) => callback(event.payload)),
   onLogs: (callback: () => void) => listen("logs-changed", callback),
   workspace: (): Promise<Workspace> =>
     isDesktop()
       ? invoke("workspace")
       : Promise.resolve({
           projects: [],
+          groups: [],
           ai: {
             enabled: false,
             endpoint: "http://127.0.0.1:47831/mcp",
@@ -52,6 +56,13 @@ export const api = {
     invoke("open_project", { path }),
   removeProject: (projectId: string): Promise<void> =>
     invoke("remove_project", { projectId }),
+  saveGroup: (
+    id: string | undefined,
+    name: string,
+    services: ServiceRef[],
+  ): Promise<WorkspaceGroup> =>
+    invoke("save_group", { id: id ?? null, name, services }),
+  removeGroup: (id: string): Promise<void> => invoke("remove_group", { id }),
   saveService: (
     projectId: string,
     definition: ServiceDefinition,

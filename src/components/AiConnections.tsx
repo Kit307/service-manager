@@ -79,7 +79,7 @@ export function AiConnections({
       </section>
       <section className="settings-section">
         <h2>Connected client profiles</h2>
-        <p>Choose exactly which projects and actions each client may access.</p>
+        <p>Choose which working folders and actions each client may access. Groups do not change AI permissions.</p>
         {!workspace.ai.clients.length && (
           <p className="empty-inline">
             No client profiles yet. Create one for each AI client.
@@ -91,7 +91,7 @@ export function AiConnections({
             <div>
               <strong>{client.name}</strong>
               <span>
-                {client.projects.length} projects · Read
+                {client.projects.length} working folders · Read
                 {client.control ? " + control" : ""}
                 {client.edit ? " + edit commands" : ""}
                 {client.projectRoots?.length ? ` · ${client.projectRoots.length} allowed folders` : ""}
@@ -138,10 +138,10 @@ export function AiConnections({
           />
         </label>
         <fieldset className="project-grants">
-          <legend>Allowed projects</legend>
+          <legend>Allowed service folders</legend>
           {workspace.projects.length ? (
             workspace.projects.map((p) => (
-              <label key={p.id}>
+              <label key={p.id} title={p.path}>
                 <input
                   type="checkbox"
                   checked={projects.includes(p.id)}
@@ -157,11 +157,11 @@ export function AiConnections({
               </label>
             ))
           ) : (
-            <p>No projects open yet. Choose an allowed folder below so AI can create or open projects itself.</p>
+            <p>No service folders open yet. Choose an allowed folder below so AI can create or open working folders.</p>
           )}
         </fieldset>
         <fieldset className="project-grants">
-          <legend>Allow project creation and opening inside folders</legend>
+          <legend>Allow creation and opening inside folders</legend>
           <p>This client will automatically get access to projects it creates or opens inside these folders, using the control and edit permissions selected below. Opening a folder does not run commands.</p>
           {projectRoots.map((root) => (
             <div className="settings-row" key={root}>

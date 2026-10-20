@@ -1,10 +1,5 @@
 export type ServiceState =
-  | "stopped"
-  | "starting"
-  | "running"
-  | "ready"
-  | "stopping"
-  | "failed";
+  "stopped" | "starting" | "running" | "ready" | "stopping" | "failed";
 export type ServiceDefinition = {
   id: string;
   name: string;
@@ -59,7 +54,18 @@ export type AiStatus = {
 };
 export type Workspace = {
   projects: Project[];
+  groups: WorkspaceGroup[];
   ai: AiStatus;
   uncleanShutdown: boolean;
 };
+export type ServiceRef = { projectId: string; serviceId: string };
+export type WorkspaceGroup = {
+  id: string;
+  name: string;
+  services: ServiceRef[];
+};
 export const stopped: Snapshot = { state: "stopped", health: "notConfigured" };
+export const serviceActive = (state?: string) =>
+  ["starting", "running", "ready", "stopping"].includes(state ?? "");
+export const stateLabel = (state: string) =>
+  state.charAt(0).toUpperCase() + state.slice(1);

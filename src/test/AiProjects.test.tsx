@@ -13,7 +13,7 @@ it("bootstraps an AI client with a selected parent folder and no opened projects
   vi.mocked(pickProjectFolder).mockResolvedValue("/workspace");
   vi.mocked(api.createClient).mockResolvedValue({ id:"fixture", token:"fixture-token", proxyPath:"/fixture/proxy.sh" });
   const user = userEvent.setup();
-  render(<AiConnections workspace={{projects:[], ai:{enabled:true, endpoint:"http://127.0.0.1:47831/mcp", clients:[]}, uncleanShutdown:false}} onRefresh={async () => {}} onError={vi.fn()} />);
+  render(<AiConnections workspace={{projects:[], groups:[], ai:{enabled:true, endpoint:"http://127.0.0.1:47831/mcp", clients:[]}, uncleanShutdown:false}} onRefresh={async () => {}} onError={vi.fn()} />);
   const create = screen.getByRole("button", {name:"Create profile & proxy"});
   expect(create).toBeDisabled();
   await user.click(screen.getByRole("button", {name:"Add allowed folder"}));

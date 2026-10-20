@@ -3,13 +3,13 @@ import { describe, expect, it } from "vitest";
 import App from "../App";
 
 describe("first launch", () => {
-  it("offers Open Folder and explains that opening does not run commands", () => {
+  it("offers Add service and explains that adding does not run commands", () => {
     render(<App />);
     expect(
-      screen.getAllByRole("button", { name: "Open Folder" })[0],
+      screen.getAllByRole("button", { name: "Add service" })[0],
     ).toBeVisible();
     expect(
-      screen.getByText(/Opening a folder never runs its commands/),
+      screen.getByText(/Adding a folder never runs its commands/),
     ).toBeVisible();
   });
 });

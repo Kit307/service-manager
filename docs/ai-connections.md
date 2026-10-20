@@ -4,7 +4,7 @@ The desktop app hosts one authenticated Streamable HTTP MCP endpoint at `http://
 
 ## Create a profile
 
-In AI Connections, enable the connection and name a client profile. Select existing opened projects, allowed parent folders, or both. A client with an allowed parent folder can create/open projects itself even when the workspace is empty. Read permission is implicit; control and editing executable commands are separate explicit grants. Editing does not imply permission to start a service. New/imported executable settings require local trust; a local edit grant authorizes subsequent MCP configuration edits for that project.
+In AI Connections, enable the connection and name a client profile. Select existing service working folders, allowed parent folders, or both. A client with an allowed parent folder can create/open projects itself even when the workspace is empty. Read permission is implicit; control and editing executable commands are separate explicit grants. Editing does not imply permission to start a service. New/imported executable settings require local trust; a local edit grant authorizes subsequent MCP configuration edits for that project.
 
 The allowed-folder picker grants access to create/open projects inside exactly the chosen directory. The client automatically receives access to those projects using its selected control/edit permissions. Existing profiles are not expanded automatically; create a new profile with the desired roots if needed. Revoke the old profile when it is no longer needed.
 
@@ -16,7 +16,7 @@ The v0.3.0 MCP tools are:
 - `create_project {root, name}` creates one new empty child folder and registers it; existing paths are never overwritten.
 - `open_project {root, relativePath}` registers an existing folder inside a returned root, preserving its saved services.
 
-Use the returned project `id` with `get_project_config` and the service tools. Both operations appear in the same desktop workspace without starting services. Creation does not generate framework code or initialize git. Absolute relative paths, parent traversal and out-of-root symlinks are rejected. Parent-folder access does not itself trust existing executable settings.
+Use the returned project `id` with `get_project_config` and the service tools. Their configured services appear directly in the desktop workspace without starting them. Since v0.4.0 the UI uses Group → Service; MCP retains project IDs as working-folder/configuration identities for compatibility. Virtual group membership never changes client grants. Creation does not generate framework code or initialize git. Absolute relative paths, parent traversal and out-of-root symlinks are rejected. Parent-folder access does not itself trust existing executable settings.
 
 If a create request times out or saving client grants fails, the empty folder/project may already exist locally. After resolving the error, inspect the workspace and use `open_project` rather than overwriting/deleting it or repeatedly calling `create_project`. The proxy retains only its existing list/run/logs interface; project creation/opening uses MCP.
 
