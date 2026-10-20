@@ -2,7 +2,7 @@
 
 A desktop app for running project services without typing commands in a terminal.
 
-Version 0.2.2 implements the local desktop workflow: command and owned Docker Compose services, project configuration, live logs, loopback health checks, and authenticated MCP/proxy access share one Rust manager. This is a local macOS development release without Developer ID signing or notarization.
+Version 0.2.3 implements the local desktop workflow: command and owned Docker Compose services, project configuration, live logs, loopback health checks, and authenticated MCP/proxy access share one Rust manager. This is a local macOS development release without Developer ID signing or notarization.
 
 ## Selected stack
 
