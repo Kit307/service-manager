@@ -174,6 +174,56 @@ impl ProjectStore {
     }
     pub fn open(&mut self, path: &str) -> Result<Project> {
         let root = Path::new(path).canonicalize()?;
+        self.open_root(root)
+    }
+    pub fn open_within(
+        &mut self,
+        allowed: &Path,
+        relative: &Path,
+        create: bool,
+    ) -> Result<Project> {
+        use std::path::Component;
+        if !allowed.is_absolute() || allowed.canonicalize()? != allowed || !allowed.is_dir() {
+            return Err(AppError::new(
+                "PERMISSION_DENIED",
+                "The allowed folder changed. Choose it again locally.",
+            ));
+        }
+        if relative.as_os_str().is_empty()
+            || relative.components().any(|c| {
+                matches!(
+                    c,
+                    Component::ParentDir | Component::RootDir | Component::Prefix(_)
+                )
+            })
+        {
+            return Err(AppError::new(
+                "CONFIG_INVALID",
+                "Use a relative project path inside the allowed folder.",
+            ));
+        }
+        let target = allowed.join(relative);
+        if create {
+            if relative.components().count() != 1
+                || !matches!(relative.components().next(), Some(Component::Normal(_)))
+            {
+                return Err(AppError::new(
+                    "CONFIG_INVALID",
+                    "A new project needs a single folder name.",
+                ));
+            }
+            std::fs::create_dir(&target).map_err(|_| AppError::new("CONFIG_INVALID", "Could not create the folder. It may already exist; existing files were preserved."))?;
+        }
+        let root = target.canonicalize()?;
+        if !root.starts_with(allowed) {
+            return Err(AppError::new(
+                "PERMISSION_DENIED",
+                "The project resolves outside the allowed folder.",
+            ));
+        }
+        self.open_root(root)
+    }
+    fn open_root(&mut self, root: PathBuf) -> Result<Project> {
         if !root.is_dir() {
             return Err(AppError::new(
                 "CONFIG_INVALID",

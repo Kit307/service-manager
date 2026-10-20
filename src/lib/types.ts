@@ -51,6 +51,7 @@ export type AiStatus = {
     id: string;
     name: string;
     projects: string[];
+    projectRoots: string[];
     control: boolean;
     edit: boolean;
   }[];

@@ -257,7 +257,7 @@ export default function App() {
             <Icon name="terminal" size={18} />
           </span>
           <span>Service Manager</span>
-          <span className="version">0.2</span>
+          <span className="version">0.3</span>
         </div>
         <button
           className="open-folder"

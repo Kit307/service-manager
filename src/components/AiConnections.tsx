@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { api, confirmAction } from "../lib/api";
+import { api, confirmAction, pickProjectFolder } from "../lib/api";
 import type { Workspace } from "../lib/types";
 import { Icon } from "./Icon";
 
@@ -14,6 +14,7 @@ export function AiConnections({
 }) {
   const [name, setName] = useState("Codex");
   const [projects, setProjects] = useState<string[]>([]);
+  const [projectRoots, setProjectRoots] = useState<string[]>([]);
   const [control, setControl] = useState(true);
   const [edit, setEdit] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -93,7 +94,9 @@ export function AiConnections({
                 {client.projects.length} projects · Read
                 {client.control ? " + control" : ""}
                 {client.edit ? " + edit commands" : ""}
+                {client.projectRoots?.length ? ` · ${client.projectRoots.length} allowed folders` : ""}
               </span>
+              {client.projectRoots?.map((root) => <span key={root}>{root}</span>)}
             </div>
             <button
               className="tiny danger-text"
@@ -119,7 +122,7 @@ export function AiConnections({
           e.preventDefault();
           void perform(async () =>
             setCredential(
-              await api.createClient(name, projects, control, edit),
+              await api.createClient(name, projects, control, edit, projectRoots),
             ),
           );
         }}
@@ -154,8 +157,28 @@ export function AiConnections({
               </label>
             ))
           ) : (
-            <p>Open a project folder first.</p>
+            <p>No projects open yet. Choose an allowed folder below so AI can create or open projects itself.</p>
           )}
+        </fieldset>
+        <fieldset className="project-grants">
+          <legend>Allow project creation and opening inside folders</legend>
+          <p>This client will automatically get access to projects it creates or opens inside these folders, using the control and edit permissions selected below. Opening a folder does not run commands.</p>
+          {projectRoots.map((root) => (
+            <div className="settings-row" key={root}>
+              <code>{root}</code>
+              <button type="button" className="icon-button" aria-label={`Remove allowed folder ${root}`} disabled={busy} onClick={() => setProjectRoots((roots) => roots.filter((p) => p !== root))}>
+                <Icon name="close" size={14} />
+              </button>
+            </div>
+          ))}
+          <button type="button" className="secondary" disabled={busy} onClick={() => {
+            void perform(async () => {
+              const root = await pickProjectFolder("Allow AI to create and open projects inside this folder");
+              if (typeof root === "string") setProjectRoots((roots) => roots.includes(root) ? roots : [...roots, root]);
+            });
+          }}>
+            <Icon name="folder" /> Add allowed folder
+          </button>
         </fieldset>
         <div className="grant-options">
           <label>
@@ -183,7 +206,7 @@ export function AiConnections({
         )}
         <button
           className="primary"
-          disabled={busy || !workspace.ai.enabled || !projects.length}
+          disabled={busy || !workspace.ai.enabled || (!projects.length && !projectRoots.length)}
         >
           <Icon name="plus" />
           Create profile & proxy

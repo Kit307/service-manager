@@ -39,6 +39,7 @@ async fn real_sdk_and_proxy_share_one_run_and_revocation_blocks_access() {
             vec![p.id.clone()],
             true,
             false,
+            vec![],
             std::path::PathBuf::from(env!("CARGO_BIN_EXE_service-manager")),
         )
         .await

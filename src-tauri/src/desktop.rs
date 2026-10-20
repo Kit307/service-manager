@@ -136,10 +136,18 @@ async fn create_client(
     projects: Vec<String>,
     control: bool,
     edit: bool,
+    project_roots: Vec<String>,
 ) -> Result<crate::mcp::CreatedClient> {
     state
         .ai
-        .create(name, projects, control, edit, std::env::current_exe()?)
+        .create(
+            name,
+            projects,
+            control,
+            edit,
+            project_roots,
+            std::env::current_exe()?,
+        )
         .await
 }
 #[tauri::command]

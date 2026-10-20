@@ -22,7 +22,7 @@ use rmcp::{
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc,
@@ -43,6 +43,8 @@ pub struct ClientProfile {
     pub id: String,
     pub name: String,
     pub projects: Vec<String>,
+    #[serde(default)]
+    pub project_roots: Vec<String>,
     pub control: bool,
     pub edit: bool,
     pub token_hash: String,
@@ -96,7 +98,7 @@ impl AiBridge {
             .as_ref()
             .is_some_and(|s| !s.is_finished());
         let clients = self.clients.lock().await;
-        json!({"enabled": enabled, "endpoint": self.endpoint, "clients": clients.iter().map(|c| json!({"id":c.id,"name":c.name,"projects":c.projects,"control":c.control,"edit":c.edit})).collect::<Vec<_>>()})
+        json!({"enabled": enabled, "endpoint": self.endpoint, "clients": clients.iter().map(|c| json!({"id":c.id,"name":c.name,"projects":c.projects,"projectRoots":c.project_roots,"control":c.control,"edit":c.edit})).collect::<Vec<_>>()})
     }
     pub async fn set_enabled(&self, enabled: bool) -> Result<Value> {
         let mut server = self.server.lock().await;
@@ -153,13 +155,31 @@ impl AiBridge {
         projects: Vec<String>,
         control: bool,
         edit: bool,
+        project_roots: Vec<String>,
         executable: PathBuf,
     ) -> Result<CreatedClient> {
-        if name.trim().is_empty() || name.len() > 80 || projects.is_empty() {
+        if name.trim().is_empty()
+            || name.len() > 80
+            || (projects.is_empty() && project_roots.is_empty())
+        {
             return Err(AppError::new(
                 "CONFIG_INVALID",
-                "Choose a client name and at least one opened project.",
+                "Choose a client name and at least one project or allowed folder.",
             ));
+        }
+        let mut roots = Vec::new();
+        for path in project_roots {
+            let root = Path::new(&path).canonicalize()?;
+            if !root.is_dir() {
+                return Err(AppError::new(
+                    "CONFIG_INVALID",
+                    "An allowed project folder must be a directory.",
+                ));
+            }
+            let root = root.to_string_lossy().into_owned();
+            if !roots.contains(&root) {
+                roots.push(root);
+            }
         }
         let opened = self.manager.projects().await;
         if !projects.iter().all(|id| opened.iter().any(|p| p.id == *id)) {
@@ -177,6 +197,7 @@ impl AiBridge {
             id: id.clone(),
             name,
             projects,
+            project_roots: roots,
             control,
             edit,
             token_hash: hash(token.as_bytes()),
@@ -224,6 +245,40 @@ impl AiBridge {
         )?;
         *clients = next;
         Ok(())
+    }
+    async fn register_project(
+        &self,
+        client_id: &str,
+        root: &str,
+        relative: &str,
+        create: bool,
+    ) -> Result<Value> {
+        let mut clients = self.clients.lock().await;
+        let index = clients
+            .iter()
+            .position(|c| c.id == client_id)
+            .ok_or_else(|| AppError::new("PERMISSION_DENIED", "Client was revoked."))?;
+        if !clients[index].project_roots.iter().any(|p| p == root) {
+            return Err(AppError::new(
+                "PERMISSION_DENIED",
+                "Choose an allowed parent folder for this client locally first.",
+            ));
+        }
+        let project = self.manager.store.lock().await.open_within(
+            Path::new(root),
+            Path::new(relative),
+            create,
+        )?;
+        if !clients[index].projects.contains(&project.id) {
+            let mut next = clients.clone();
+            next[index].projects.push(project.id.clone());
+            secure_write(
+                &self.dir.join("clients.json"),
+                &serde_json::to_vec_pretty(&next).unwrap(),
+            )?;
+            *clients = next;
+        }
+        Ok(json!(project))
     }
     pub async fn authenticate_token(&self, token: &str) -> Option<ClientProfile> {
         let digest = hash(token.as_bytes());
@@ -311,6 +366,9 @@ struct Tools {
 fn definitions() -> Vec<Tool> {
     let definitions = [
         ("list_projects", "List only locally opened projects granted to this client.", false, false),
+        ("list_project_roots", "List parent folders this client may create or open projects inside. Choose one before creating or opening a project.", false, false),
+        ("create_project", "Create one new empty project folder inside an allowed root and register it. Never overwrites files, initializes git, or starts commands.", false, false),
+        ("open_project", "Register an existing folder inside an allowed root and grant this client access using its existing control/edit permissions. Never starts commands.", false, false),
         ("list_services", "Read configured services and their actual runtime state.", true, false),
         ("get_project_config", "Read service configuration and its revision. Environment file contents are never returned.", true, false),
         ("get_service_status", "Read the actual process state; running does not imply ready.", true, true),
@@ -325,14 +383,40 @@ fn definitions() -> Vec<Tool> {
         if project { properties.insert("projectId".into(), json!({"type":"string"})); required.push("projectId"); }
         if service { properties.insert("serviceId".into(), json!({"type":"string"})); required.push("serviceId"); }
         if name == "read_logs" { properties.insert("cursor".into(), json!({"type":"string","pattern":"^[0-9]+$"})); }
+        if matches!(name, "create_project" | "open_project") {
+            properties.insert("root".into(), json!({"type":"string"})); required.push("root");
+            let field = if name == "create_project" { "name" } else { "relativePath" };
+            properties.insert(field.into(), json!({"type":"string","minLength":1})); required.push(field);
+        }
         if name == "upsert_service" { properties.insert("definition".into(), json!({"type":"object"})); properties.insert("expectedRevision".into(), json!({"type":"string"})); required.extend(["definition", "expectedRevision"]); }
         let schema = json!({"type":"object","properties":properties,"required":required,"additionalProperties":false});
-        Tool::new(name, description, schema.as_object().unwrap().clone()).with_annotations(ToolAnnotations::new().read_only(!matches!(name, "start_service" | "stop_service" | "restart_service" | "upsert_service")))
+        Tool::new(name, description, schema.as_object().unwrap().clone()).with_annotations(ToolAnnotations::new().read_only(!matches!(name, "start_service" | "stop_service" | "restart_service" | "upsert_service" | "create_project" | "open_project")))
     }).collect()
 }
 impl Tools {
     async fn execute(&self, client_id: &str, name: &str, args: Value) -> Result<Value> {
-        if name == "list_projects" {
+        if matches!(name, "create_project" | "open_project") {
+            let root = args
+                .get("root")
+                .and_then(Value::as_str)
+                .ok_or_else(|| AppError::new("CONFIG_INVALID", "root is required."))?;
+            let field = if name == "create_project" {
+                "name"
+            } else {
+                "relativePath"
+            };
+            let relative = args.get(field).and_then(Value::as_str).ok_or_else(|| {
+                AppError::new(
+                    "CONFIG_INVALID",
+                    "A project folder name or relative path is required.",
+                )
+            })?;
+            return self
+                .bridge
+                .register_project(client_id, root, relative, name == "create_project")
+                .await;
+        }
+        if matches!(name, "list_projects" | "list_project_roots") {
             let clients = self.bridge.clients.lock().await;
             let client = clients
                 .iter()
@@ -340,6 +424,11 @@ impl Tools {
                 .ok_or_else(|| AppError::new("PERMISSION_DENIED", "Client was revoked."))?
                 .clone();
             drop(clients);
+            if name == "list_project_roots" {
+                return Ok(
+                    json!({"roots":client.project_roots.iter().map(|path| json!({"path":path})).collect::<Vec<_>>()}),
+                );
+            }
             return Ok(
                 json!({"projects":self.bridge.manager.projects().await.iter().filter(|p| client.projects.contains(&p.id)).map(|p| json!({"id":p.id,"name":p.name})).collect::<Vec<_>>()}),
             );

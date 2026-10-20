@@ -1,4 +1,4 @@
 interface:
   display_name: "Service Manager"
-  short_description: "Run registered services and read shared logs"
-  default_prompt: "Use $service-manager to run a registered local service and read its logs."
+  short_description: "Manage local projects, services and shared logs"
+  default_prompt: "Use $service-manager to manage local projects, services and logs within the granted scope."

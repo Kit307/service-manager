@@ -43,6 +43,7 @@ async fn main() {
             vec![project.id.clone()],
             true,
             false,
+            vec![],
             PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target/debug/service-manager"),
         )
         .await

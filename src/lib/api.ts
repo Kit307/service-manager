@@ -24,13 +24,13 @@ export function errorMessage(error: unknown): string {
     return String(error.message);
   return typeof error === "string" ? error : "Something went wrong. Try again.";
 }
-export async function pickProjectFolder() {
+export async function pickProjectFolder(title = "Open a code folder") {
   if (!isDesktop())
     throw new Error("Open the desktop app to choose a project folder.");
   return open({
     directory: true,
     multiple: false,
-    title: "Open a code folder",
+    title,
   });
 }
 export const api = {
@@ -89,7 +89,8 @@ export const api = {
     projects: string[],
     control: boolean,
     edit: boolean,
+    projectRoots: string[] = [],
   ): Promise<{ token: string; id: string; proxyPath: string }> =>
-    invoke("create_client", { name, projects, control, edit }),
+    invoke("create_client", { name, projects, control, edit, projectRoots }),
   revokeClient: (id: string): Promise<void> => invoke("revoke_client", { id }),
 };

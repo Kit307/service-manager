@@ -1,6 +1,6 @@
 # ติดตั้ง Service Manager skill
 
-Skill นี้สอน Codex/Claude ใช้ MCP และ proxy ของ Service Manager: หา project/service ที่ถูกต้อง, Run/Stop/Restart, อ่าน log ต่อด้วย cursor, เพิ่ม/แก้ command ด้วย revision และแยกข้อความใน log ออกจากคำสั่งของผู้ใช้
+Skill นี้สอน Codex/Claude ใช้ MCP และ proxy ของ Service Manager: สร้างหรือเปิดโปรเจกต์ในโฟลเดอร์หลักที่อนุญาต, หา project/service ที่ถูกต้อง, Run/Stop/Restart, อ่าน log ต่อด้วย cursor, เพิ่ม/แก้ command ด้วย revision และแยกข้อความใน log ออกจากคำสั่งของผู้ใช้
 
 Skill ไม่ได้ติดตั้ง MCP connection, สร้าง token, login AI หรือเพิ่มสิทธิ์ให้เอง ต้องเปิดแอปและตั้ง client profile ใน AI Connections ก่อน ตาม [คู่มือ AI](ai-connections.md)
 
@@ -44,6 +44,8 @@ Claude Code:
 
 ตัวอย่างงานอื่น:
 
+- “ใช้ service-manager สร้างโปรเจกต์ demo ในโฟลเดอร์หลักที่อนุญาต ยังไม่เพิ่มหรือรัน service”
+- “ใช้ service-manager เปิดโฟลเดอร์ backend เข้าแอป โดยใช้ root ที่อนุญาต”
 - “ใช้ service-manager เช็กสถานะ frontend แล้วอ่านเฉพาะ error ที่เกี่ยวข้อง โดยไม่ restart”
 - “ใช้ service-manager เพิ่ม service worker ด้วยคำสั่งที่กำหนด บันทึกอย่างเดียว ยังไม่รัน”
 - “ใช้ service-manager หยุด backend แล้วตรวจว่าหยุดสำเร็จ”
