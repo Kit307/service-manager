@@ -27,7 +27,7 @@ pub struct Project {
     pub trusted: Vec<String>,
     pub runtime: HashMap<String, Snapshot>,
 }
-#[derive(Default, Serialize, Deserialize)]
+#[derive(Clone, Default, Serialize, Deserialize)]
 pub struct PrivateState {
     pub projects: HashMap<String, String>,
     pub trust: HashMap<String, HashMap<String, String>>,
@@ -242,6 +242,31 @@ impl ProjectStore {
             .path
             .clone();
         self.open(&path)
+    }
+    pub fn remove_project(&mut self, id: &str) -> Result<()> {
+        let project = self
+            .projects
+            .get(id)
+            .ok_or_else(|| AppError::new("PROJECT_NOT_AUTHORIZED", "Project is not open."))?;
+        if project.runtime.values().any(Snapshot::active) {
+            return Err(AppError::new(
+                "OPERATION_IN_PROGRESS",
+                "Stop all services successfully before removing this project.",
+            ));
+        }
+        let previous = self.private.clone();
+        self.private.projects.remove(id);
+        self.private.trust.remove(id);
+        let prefix = format!("{id}/");
+        self.private
+            .compose_owners
+            .retain(|key, _| !key.starts_with(&prefix));
+        if let Err(error) = self.persist() {
+            self.private = previous;
+            return Err(error);
+        }
+        self.projects.remove(id);
+        Ok(())
     }
     pub fn save(&mut self, id: &str, config: ProjectConfig, revision: &str) -> Result<Project> {
         let project = self.refresh(id)?;

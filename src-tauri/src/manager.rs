@@ -38,6 +38,9 @@ impl Manager {
     pub async fn open(&self, path: &str) -> Result<Project> {
         self.store.lock().await.open(path)
     }
+    pub async fn remove_project(&self, project: &str) -> Result<()> {
+        self.store.lock().await.remove_project(project)
+    }
     pub async fn projects(&self) -> Vec<Project> {
         let mut store = self.store.lock().await;
         let ids: Vec<_> = store.projects.keys().cloned().collect();

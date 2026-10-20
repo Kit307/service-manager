@@ -225,6 +225,30 @@ export default function App() {
     });
   }
 
+  async function removeProject(p: Project) {
+    const composeNote = p.config.services.some((s) => s.type === "compose")
+      ? "\n\nDocker containers and volumes will be kept. Opening this folder again creates a new managed stack; existing Docker data is not reused automatically."
+      : "";
+    if (!(await confirmAction(
+      `Remove “${p.name}” from Service Manager?\n\nYour code folder and saved service configuration will be kept. You can open the folder again later. Unsaved edits to this project will be discarded.${composeNote}`,
+      "Remove project?",
+    ))) return;
+    await perform(async () => {
+      await api.removeProject(p.id);
+      const data = await refresh();
+      if (projectId === p.id) {
+        if (data.projects[0]) select(data.projects[0]);
+        else {
+          setProjectId("");
+          setServiceId("");
+          setLogs([]);
+          setGap(false);
+          setView("service");
+        }
+      }
+    });
+  }
+
   return (
     <div className="app-shell">
       <aside className="sidebar" aria-label="Projects and services">
@@ -251,6 +275,7 @@ export default function App() {
         <nav className="project-tree">
           {workspace.projects.map((p) => (
             <div className="project-group" key={p.id}>
+              <div className="project-header">
               <button
                 className={`project-row ${projectId === p.id && view !== "ai" ? "current" : ""}`}
                 onClick={() => select(p)}
@@ -264,6 +289,16 @@ export default function App() {
                 <Icon name="folder" size={15} />
                 <span>{p.name}</span>
               </button>
+              <button
+                className="icon-button remove-project"
+                aria-label={`Remove project ${p.name}`}
+                title={Object.values(p.runtime).some((s) => ["starting", "running", "ready", "stopping"].includes(s.state)) ? "Stop all services before removing this project" : "Remove project from Service Manager"}
+                disabled={busy || Object.values(p.runtime).some((s) => ["starting", "running", "ready", "stopping"].includes(s.state))}
+                onClick={() => { void removeProject(p); }}
+              >
+                <Icon name="close" size={14} />
+              </button>
+              </div>
               {p.config.services.map((s) => {
                 const state = p.runtime[s.id]?.state ?? "stopped";
                 return (

@@ -46,6 +46,10 @@ async fn trusted_service_starts_once_and_collects_output() {
     }
     let _cleanup = Cleanup(first.pid.unwrap());
     assert_eq!(first.run_id, second.run_id);
+    assert_eq!(
+        manager.remove_project(&p.id).await.unwrap_err().code,
+        "OPERATION_IN_PROGRESS"
+    );
     let mut found = false;
     for _ in 0..40 {
         if manager
@@ -72,6 +76,17 @@ async fn trusted_service_starts_once_and_collects_output() {
     assert!(
         found,
         "the real process output must reach the shared log store"
+    );
+    manager.remove_project(&p.id).await.unwrap();
+    assert!(manager.projects().await.is_empty());
+    assert_eq!(
+        manager
+            .start(&p.id, "web", "test")
+            .await
+            .err()
+            .unwrap()
+            .code,
+        "PROJECT_NOT_AUTHORIZED"
     );
 }
 

@@ -50,6 +50,8 @@ export const api = {
         }),
   openProject: (path: string): Promise<Project> =>
     invoke("open_project", { path }),
+  removeProject: (projectId: string): Promise<void> =>
+    invoke("remove_project", { projectId }),
   saveService: (
     projectId: string,
     definition: ServiceDefinition,

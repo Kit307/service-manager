@@ -24,6 +24,10 @@ async fn open_project(state: State<'_, DesktopState>, path: String) -> Result<Pr
     state.manager.open(&path).await
 }
 #[tauri::command]
+async fn remove_project(state: State<'_, DesktopState>, project_id: String) -> Result<()> {
+    state.manager.remove_project(&project_id).await
+}
+#[tauri::command]
 async fn save_service(
     state: State<'_, DesktopState>,
     project_id: String,
@@ -237,6 +241,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             workspace,
             open_project,
+            remove_project,
             save_service,
             trust_service,
             control_service,

@@ -218,6 +218,17 @@ pre {
 .project-group {
   margin-bottom: 18px;
 }
+.project-header {
+  display: flex;
+  align-items: center;
+}
+.project-header .project-row {
+  flex: 1;
+  min-width: 0;
+}
+.remove-project {
+  flex-shrink: 0;
+}
 .project-row {
   width: 100%;
   padding: 8px 5px;

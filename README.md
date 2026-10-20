@@ -2,7 +2,7 @@
 
 A desktop app for running project services without typing commands in a terminal.
 
-Version 0.2.3 implements the local desktop workflow: command and owned Docker Compose services, project configuration, live logs, loopback health checks, and authenticated MCP/proxy access share one Rust manager. This is a local macOS development release without Developer ID signing or notarization.
+Version 0.2.4 implements the local desktop workflow: command and owned Docker Compose services, project configuration, live logs, loopback health checks, and authenticated MCP/proxy access share one Rust manager. This is a local macOS development release without Developer ID signing or notarization.
 
 ## Selected stack
 
@@ -30,6 +30,10 @@ The [implementation plan](docs/superpowers/plans/2026-10-16-service-manager-plan
 Window minimization is disabled; manual resizing remains available and startup uses the normal window size. Open Service Manager, choose Open Folder, and add a command or Docker Compose service. Save the definition, review it on Run, and approve its exact configuration before first execution. Settings and commands persist in `.service-manager/project.json`. Existing malformed files are preserved and reported as errors.
 
 Run supports foreground noninteractive commands such as `pnpm dev` and `go run ./cmd/api`. Stop signals the owned process group, escalates after five seconds, and waits for cleanup. Opening a folder does not execute anything. Running and Ready remain different states; configure a loopback health check to establish readiness.
+
+Use the × button beside a project name to remove it from Service Manager. Stop all of its services first, then confirm removal. The code folder and `.service-manager/project.json` remain on disk; Open Folder restores the saved services. Reopened projects require fresh service trust and AI access grants. Removal only changes the app's workspace list and private trust records.
+
+For Compose projects, removal preserves Docker containers and volumes. Reopening creates a new managed stack with a new ownership identity; existing Docker data is not reused automatically. The removal dialog explains this before confirmation.
 
 Closing the window hides it. Use the menu/tray or Dock to reopen it. Quit asks to stop active services first and blocks new starts while cleanup is in progress. Commands run with your normal user permissions; the application is not a sandbox for untrusted repositories. Deliberately detached children and abrupt OS/app termination are outside guaranteed cleanup.
 
