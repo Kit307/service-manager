@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { stateLabel, type WorkspaceGroup } from "../lib/types";
+import { useEffect, useState, type DragEvent } from "react";
+import { stateLabel, type WorkspaceGroup, type ServiceRef } from "../lib/types";
 import { refKey, serviceRef, type ServiceEntry } from "../lib/workspace";
 import { Icon } from "./Icon";
 export function ServiceSidebar({
@@ -11,6 +11,7 @@ export function ServiceSidebar({
   onService,
   onGroup,
   onEdit,
+  onMove,
 }: {
   services: ServiceEntry[];
   groups: WorkspaceGroup[];
@@ -20,6 +21,7 @@ export function ServiceSidebar({
   onService: (entry: ServiceEntry) => void;
   onGroup: (id: string) => void;
   onEdit: (id: string) => void;
+  onMove: (service: ServiceRef, groupId?: string) => void;
 }) {
   const [collapsed, setCollapsed] = useState<string[]>(() => {
     try {
@@ -40,6 +42,52 @@ export function ServiceSidebar({
       /* Disclosure still works without persistent storage. */
     }
   }, [collapsed]);
+  const [dropTarget, setDropTarget] = useState<string>();
+  const dragType = "application/x-service-manager-service";
+  function dropProps(target?: string) {
+    const key = target ?? "ungrouped";
+    return {
+      onDragOver: (event: DragEvent<HTMLElement>) => {
+        if (busy || !event.dataTransfer.types.includes(dragType)) return;
+        event.preventDefault();
+        event.dataTransfer.dropEffect = "move";
+        setDropTarget(key);
+      },
+      onDragLeave: (event: DragEvent<HTMLElement>) => {
+        if (
+          !(event.relatedTarget instanceof Node) ||
+          !event.currentTarget.contains(event.relatedTarget)
+        )
+          setDropTarget(undefined);
+      },
+      onDrop: (event: DragEvent<HTMLElement>) => {
+        setDropTarget(undefined);
+        if (busy || !event.dataTransfer.types.includes(dragType)) return;
+        event.preventDefault();
+        event.stopPropagation();
+        try {
+          const value: unknown = JSON.parse(
+            event.dataTransfer.getData(dragType),
+          );
+          if (
+            !value ||
+            typeof value !== "object" ||
+            !("projectId" in value) ||
+            !("serviceId" in value)
+          )
+            return;
+          const entry = services.find(
+            (e) =>
+              e.project.id === value.projectId &&
+              e.service.id === value.serviceId,
+          );
+          if (entry) onMove(serviceRef(entry), target);
+        } catch {
+          /* Ignore external or malformed drag payloads. */
+        }
+      },
+    };
+  }
   const grouped = new Set(groups.flatMap((g) => g.services.map(refKey)));
   function row(entry: ServiceEntry) {
     const { project, service } = entry;
@@ -50,11 +98,23 @@ export function ServiceSidebar({
         key={key}
         aria-label={`${service.name} ${stateLabel(state)}`}
         className={`service-row ${selected === key ? "selected" : ""}`}
-        title={`${project.path}/${service.cwd}`}
+        title={`${project.path}/${service.cwd} · Drag to a group or Ungrouped`}
+        draggable={!busy}
+        onDragStart={(event) => {
+          event.dataTransfer.effectAllowed = "move";
+          event.dataTransfer.setData(
+            dragType,
+            JSON.stringify(serviceRef(entry)),
+          );
+        }}
+        onDragEnd={() => setDropTarget(undefined)}
         onClick={() => onService(entry)}
       >
+        <span className="drag-grip">
+          <Icon name="grip" size={12} />
+        </span>
         <span className={`status-dot ${state}`} />
-        <span>{service.name}</span>
+        <span className="service-name">{service.name}</span>
         <span className="service-type">{stateLabel(state)}</span>
       </button>
     );
@@ -65,7 +125,7 @@ export function ServiceSidebar({
         className={`ai-nav ${groupId === "" && !selected ? "selected" : ""}`}
         onClick={() => onGroup("")}
       >
-        <Icon name="terminal" />
+        <Icon name="grid" />
         All services<span className="group-count">{services.length}</span>
       </button>
       <div className="sidebar-label">
@@ -84,7 +144,13 @@ export function ServiceSidebar({
           const open = !collapsed.includes(g.id);
           const members = new Set(g.services.map(refKey));
           return (
-            <section className="workspace-group" key={g.id}>
+            <section
+              role="region"
+              aria-label={`Move service to group ${g.name}`}
+              className={`workspace-group ${dropTarget === g.id ? "drop-active" : ""}`}
+              key={g.id}
+              {...dropProps(g.id)}
+            >
               <div className="project-header group-header">
                 <button
                   className="icon-button disclosure"
@@ -107,6 +173,7 @@ export function ServiceSidebar({
                   className={`project-row ${groupId === g.id && !selected ? "current" : ""}`}
                   onClick={() => onGroup(g.id)}
                 >
+                  <Icon name="group" size={14} />
                   <span>{g.name}</span>
                   <span className="group-count">
                     {
@@ -137,8 +204,18 @@ export function ServiceSidebar({
             </section>
           );
         })}
-        {groups.length > 0 && <div className="sidebar-label">Ungrouped</div>}
-        {services.filter((e) => !grouped.has(refKey(serviceRef(e)))).map(row)}
+        <section
+          role="region"
+          aria-label="Move service to Ungrouped"
+          className={`ungrouped-drop ${dropTarget === "ungrouped" ? "drop-active" : ""}`}
+          {...dropProps()}
+        >
+          <div className="sidebar-label">Ungrouped</div>
+          {services.filter((e) => !grouped.has(refKey(serviceRef(e)))).map(row)}
+          <p className="drop-hint">
+            Drag a service here to remove it from a group.
+          </p>
+        </section>
       </nav>
     </>
   );

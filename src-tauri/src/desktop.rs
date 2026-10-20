@@ -45,6 +45,19 @@ async fn save_group(
         .save_group(id.as_deref(), &name, services)
 }
 #[tauri::command]
+async fn move_service(
+    state: State<'_, DesktopState>,
+    service: ServiceRef,
+    group_id: Option<String>,
+) -> Result<()> {
+    state
+        .manager
+        .store
+        .lock()
+        .await
+        .move_service(service, group_id.as_deref())
+}
+#[tauri::command]
 async fn remove_group(state: State<'_, DesktopState>, id: String) -> Result<()> {
     state.manager.store.lock().await.remove_group(&id)
 }
@@ -279,6 +292,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             workspace,
             save_group,
+            move_service,
             remove_group,
             open_project,
             remove_project,

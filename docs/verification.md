@@ -1,3 +1,13 @@
+# Service Manager 0.5.0 verification
+
+- Frontend: 21 tests in 5 files passed, including token setup without scope selection, typed drag/drop and persistence errors, icon action mapping, existing group/bulk/editor/log behavior. Typecheck/build and ESLint passed.
+- Native: 27 Rust tests passed; one opt-in Docker case remains ignored. Coverage includes legacy and new token-wide access, later registration, MCP upserts/stale revisions, start/restart and proxy shared-run logs, bad tokens/revocation/Origin, filesystem root containment and atomic membership moves preserving config/runtime. Formatting and Clippy with warnings denied passed.
+- Real pointer drag/drop was exercised in Chromium using a synthetic API fixture: Running service moved out to Ungrouped and into an empty group. Native persistence is verified separately by Rust tests; native WebKit pointer interaction is not certified for this version.
+- Existing valid tokens intentionally gain full read/control/command-edit access for every registered folder after upgrade, as explicitly selected by the user. No personal credential files, installed app or real service processes were changed during verification.
+- Source skill quick_validate passed. Paid model-client sessions, live Docker and native interactive GUI tests were not repeated. Release/DMG evidence is in `.agents/evidence/TASK-0011/`.
+
+The following sections are historical verification of earlier versions and their scoped-token policy.
+
 # Service Manager 0.4.0 verification
 
 - React: 18 behavior tests cover the direct Group → Service navigation, persisted disclosure, group creation/removal/error handling, scoped bulk controls, cancellation of the second trust review, stale reviewed revisions, partial lifecycle errors and existing editor/log/AI configuration behaviors.

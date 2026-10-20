@@ -62,6 +62,11 @@ export const api = {
     services: ServiceRef[],
   ): Promise<WorkspaceGroup> =>
     invoke("save_group", { id: id ?? null, name, services }),
+  moveService: (
+    service: ServiceRef,
+    groupId: string | undefined,
+  ): Promise<void> =>
+    invoke("move_service", { service, groupId: groupId ?? null }),
   removeGroup: (id: string): Promise<void> => invoke("remove_group", { id }),
   saveService: (
     projectId: string,

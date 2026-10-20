@@ -252,6 +252,40 @@ impl ProjectStore {
         self.private = next;
         Ok(group)
     }
+    pub fn move_service(&mut self, service: ServiceRef, group_id: Option<&str>) -> Result<()> {
+        if !self
+            .projects
+            .get(&service.project_id)
+            .is_some_and(|p| p.config.services.iter().any(|s| s.id == service.service_id))
+        {
+            return Err(AppError::new(
+                "SERVICE_NOT_FOUND",
+                "Only registered services can be moved.",
+            ));
+        }
+        if let Some(id) = group_id {
+            let mut group = self
+                .private
+                .groups
+                .iter()
+                .find(|g| g.id == id)
+                .cloned()
+                .ok_or_else(|| AppError::new("GROUP_NOT_FOUND", "This group no longer exists."))?;
+            if group.services.contains(&service) {
+                return Ok(());
+            }
+            group.services.push(service);
+            self.save_group(Some(id), &group.name, group.services)?;
+        } else if self
+            .private
+            .groups
+            .iter()
+            .any(|g| g.services.contains(&service))
+        {
+            self.remove_service_from_groups(&service.project_id, &service.service_id)?;
+        }
+        Ok(())
+    }
     pub fn remove_service_from_groups(&mut self, project: &str, service: &str) -> Result<()> {
         let mut next = self.private.clone();
         for group in &mut next.groups {

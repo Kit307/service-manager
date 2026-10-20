@@ -105,7 +105,7 @@ export function ServiceEditor({
             checked={type === "compose"}
             onChange={() => setType("compose")}
           />
-          <Icon name="folder" />
+          <Icon name="stack" />
           Docker Compose
         </label>
       </fieldset>

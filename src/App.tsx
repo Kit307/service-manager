@@ -285,6 +285,13 @@ export default function App() {
       );
     });
   }
+  async function moveService(ref: ServiceRef, target?: string) {
+    await perform(async () => {
+      await api.moveService(ref, target);
+      if (projectId === ref.projectId && serviceId === ref.serviceId)
+        setGroupId(target ?? "");
+    });
+  }
   async function saveGroup(name: string, services: ServiceRef[]) {
     await perform(async () => {
       const saved = await api.saveGroup(group?.id, name, services);
@@ -363,7 +370,7 @@ export default function App() {
             <Icon name="terminal" size={18} />
           </span>
           <span>Service Manager</span>
-          <span className="version">0.4</span>
+          <span className="version">0.5</span>
         </div>
         <button
           className="open-folder"
@@ -372,7 +379,7 @@ export default function App() {
           }}
           disabled={busy}
         >
-          <Icon name="folder" />
+          <Icon name="plus" />
           Add service<span className="shortcut">↗</span>
         </button>
         <ServiceSidebar
@@ -387,6 +394,9 @@ export default function App() {
           busy={busy}
           onService={({ project: p, service: s }) => select(p, s.id)}
           onGroup={overview}
+          onMove={(ref, target) => {
+            void moveService(ref, target);
+          }}
           onEdit={(id) => {
             setGroupId(id);
             setView("group-settings");
@@ -425,7 +435,16 @@ export default function App() {
                 )
               }
             >
-              <Icon name="sun" size={15} />
+              <Icon
+                name={
+                  theme === "dark"
+                    ? "moon"
+                    : theme === "light"
+                      ? "sun"
+                      : "monitor"
+                }
+                size={15}
+              />
             </button>
           </div>
         </div>
@@ -433,7 +452,10 @@ export default function App() {
       <main className="workspace">
         <header className="workspace-bar">
           <div className="breadcrumb">
-            <Icon name={view === "ai" ? "ai" : "folder"} size={14} />
+            <Icon
+              name={view === "ai" ? "ai" : group ? "group" : "grid"}
+              size={14}
+            />
             <span>
               {view === "ai"
                 ? "AI Connections"
@@ -531,7 +553,7 @@ export default function App() {
                 <div className="service-identity">
                   <span className="service-icon">
                     <Icon
-                      name={service.type === "compose" ? "folder" : "terminal"}
+                      name={service.type === "compose" ? "stack" : "terminal"}
                       size={24}
                     />
                   </span>

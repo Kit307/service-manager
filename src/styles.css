@@ -253,7 +253,8 @@ pre {
   gap: 9px;
   font-size: 12px;
 }
-.service-row > span:nth-child(2) {
+.service-row .service-name {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
 }
@@ -1124,7 +1125,7 @@ label small {
   padding-left: 2px;
   min-width: 0;
 }
-.group-header .project-row > span:first-child {
+.group-header .project-row > span:not(.group-count) {
   overflow: hidden;
   text-overflow: ellipsis;
 }
@@ -1220,4 +1221,35 @@ label small {
 .group-editor small {
   display: block;
   overflow-wrap: anywhere;
+}
+
+.service-row[draggable="true"] {
+  cursor: grab;
+}
+.service-row[draggable="true"]:active {
+  cursor: grabbing;
+}
+.drag-grip {
+  color: var(--muted);
+  display: flex;
+  flex-shrink: 0;
+}
+.workspace-group,
+.ungrouped-drop {
+  border-radius: 8px;
+}
+.drop-active {
+  outline: 2px solid var(--primary);
+  outline-offset: -2px;
+  background: var(--surface);
+}
+.ungrouped-drop {
+  min-height: 90px;
+  padding-bottom: 8px;
+}
+.drop-hint {
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.5;
+  margin: 8px 12px;
 }

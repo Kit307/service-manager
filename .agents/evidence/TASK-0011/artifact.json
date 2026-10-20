@@ -1,0 +1,9 @@
+{
+  "version": "0.5.0",
+  "architecture": "arm64",
+  "sha256": "6451d51cd64411ee0a07f458ff0f7f1714fef0cd30c8f69bc75c0fc0cb3b7bd5",
+  "bytes": 8087639,
+  "dmgVerified": true,
+  "mountedIconMatches": true,
+  "applicationsShortcut": true
+}

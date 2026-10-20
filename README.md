@@ -2,7 +2,7 @@
 
 A desktop app for running project services without typing commands in a terminal.
 
-Version 0.4.0 implements the local desktop workflow: command and owned Docker Compose services, project configuration, live logs, loopback health checks, and authenticated MCP/proxy access share one Rust manager. This is a local macOS development release without Developer ID signing or notarization.
+Version 0.5.0 implements the local desktop workflow: command and owned Docker Compose services, project configuration, live logs, loopback health checks, and authenticated MCP/proxy access share one Rust manager. This is a local macOS development release without Developer ID signing or notarization.
 
 ## Selected stack
 
@@ -27,13 +27,13 @@ The [implementation plan](docs/superpowers/plans/2026-10-16-service-manager-plan
 
 ## Use the desktop app
 
-AI Connections can bootstrap an empty workspace: select an allowed parent folder when creating a client profile. MCP can then discover its allowed roots, create new empty project folders, or open existing code folders itself. Its configured services appear directly in the same app; control/edit permissions stay separate and nothing runs automatically. See [AI connections](docs/ai-connections.md).
+AI Connections can bootstrap an empty workspace: select an allowed parent folder when creating a client profile. MCP can then discover its allowed roots, create new empty project folders, or open existing code folders itself. Its configured services appear directly in the same app; one token controls all registered services and nothing runs automatically. See [AI connections](docs/ai-connections.md).
 
 Window minimization is disabled; manual resizing remains available and startup uses the normal window size. Open Service Manager, choose Add service, select its working folder, and add a command or Docker Compose service. Save the definition, review it on Run, and approve its exact configuration before first execution. Settings and commands persist in `.service-manager/project.json`. Existing malformed files are preserved and reported as errors.
 
 Run supports foreground noninteractive commands such as `pnpm dev` and `go run ./cmd/api`. Stop signals the owned process group, escalates after five seconds, and waits for cleanup. Opening a folder does not execute anything. Running and Ready remain different states; configure a loopback health check to establish readiness.
 
-Use New group or a group's settings to create, rename or remove a group and select its services. Selecting a service moves it from its previous group. Removing a group keeps its services under Ungrouped and never touches code or running processes. Grouping does not change AI permissions.
+Use New group or a group's settings to create, rename or remove a group and select its services. Selecting a service moves it from its previous group. Removing a group keeps its services under Ungrouped and never touches code or running processes. Drag a service onto a group or the Ungrouped area to move its membership without changing files or interrupting its run. Settings remains available for keyboard use. Grouping does not limit token access.
 
 Run all skips active services; Stop all and Restart all affect only the services in the selected view. All services applies to the entire workspace. All required trust reviews finish before any batch lifecycle action is submitted; canceling prevents the batch. Results are reported per service, and accepted requests do not imply Ready. Services start independently without dependency ordering. Remove a stopped service through its Settings; this removes its definition and group membership, preserving source files.
 
@@ -59,6 +59,8 @@ The loopback integration tests need permission to bind disposable local ports. A
 For isolated manual testing, set `SERVICE_MANAGER_DATA_DIR` to a new directory under the workspace before launching the development app. This does not change the normal app-data location for end users. A normal browser can inspect the empty React shell; native folder/process controls require the desktop app.
 
 ## AI access
+
+Every valid MCP/proxy token, including existing tokens, now grants read/control/command-edit access to all registered service folders and folders registered later. No per-project selection is required. MCP start/restart authorizes the current registered definition through the existing revision/trust mechanism; the manager still revalidates config and owns all process control. Keep tokens private: they authorize execution with your normal user permissions. Revocation, disabled connections and Origin rejection remain enforced. Allowed parent folders still bound filesystem creation/opening; the token does not scan arbitrary disk folders.
 
 An installable [Service Manager skill](docs/service-manager-skill.md) is included under `skills/service-manager` for Codex and Claude Code. It teaches MCP control, safe config edits and proxy log continuation; credentials and grants remain separate.
 

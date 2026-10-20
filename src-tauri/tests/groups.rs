@@ -143,3 +143,59 @@ fn explicit_service_and_root_removal_clean_membership() {
     assert!(store.private.groups[0].services.is_empty());
     assert!(root.path().join(".service-manager/project.json").exists());
 }
+
+#[test]
+fn direct_moves_preserve_other_members_and_reject_failed_or_foreign_moves() {
+    let state = tempfile::tempdir().unwrap();
+    let root = tempfile::tempdir().unwrap();
+    let other = tempfile::tempdir().unwrap();
+    let mut store = ProjectStore::new(state.path().into()).unwrap();
+    let a = register(&mut store, root.path());
+    let b = register(&mut store, other.path());
+    let one = store
+        .save_group(None, "One", vec![a.clone(), b.clone()])
+        .unwrap();
+    let two = store.save_group(None, "Two", vec![]).unwrap();
+    let bytes = std::fs::read(root.path().join(".service-manager/project.json")).unwrap();
+    store
+        .projects
+        .get_mut(&a.project_id)
+        .unwrap()
+        .runtime
+        .insert(
+            "web".into(),
+            Snapshot {
+                state: "running".into(),
+                ..Default::default()
+            },
+        );
+    store.move_service(a.clone(), Some(&two.id)).unwrap();
+    store.move_service(a.clone(), Some(&two.id)).unwrap();
+    assert_eq!(store.private.groups[0].services, vec![b]);
+    assert_eq!(store.private.groups[1].services, vec![a.clone()]);
+    assert!(store.move_service(a.clone(), Some("missing")).is_err());
+    assert!(store
+        .move_service(
+            ServiceRef {
+                project_id: "foreign".into(),
+                service_id: "web".into()
+            },
+            None
+        )
+        .is_err());
+    let target = state.path().join("backup.json");
+    std::fs::rename(state.path().join("state.json"), &target).unwrap();
+    std::os::unix::fs::symlink(&target, state.path().join("state.json")).unwrap();
+    assert!(store.move_service(a.clone(), Some(&one.id)).is_err());
+    assert_eq!(store.private.groups[1].services, vec![a.clone()]);
+    std::fs::remove_file(state.path().join("state.json")).unwrap();
+    std::fs::rename(target, state.path().join("state.json")).unwrap();
+    store.move_service(a.clone(), None).unwrap();
+    let loaded = ProjectStore::new(state.path().into()).unwrap();
+    assert!(loaded.private.groups[1].services.is_empty());
+    assert!(store.projects[&a.project_id].runtime["web"].active());
+    assert_eq!(
+        std::fs::read(root.path().join(".service-manager/project.json")).unwrap(),
+        bytes
+    );
+}
