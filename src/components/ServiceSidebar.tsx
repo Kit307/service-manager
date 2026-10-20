@@ -1,4 +1,4 @@
-import { useEffect, useState, type DragEvent } from "react";
+import { useEffect, useRef, useState, type PointerEvent } from "react";
 import { stateLabel, type WorkspaceGroup, type ServiceRef } from "../lib/types";
 import { refKey, serviceRef, type ServiceEntry } from "../lib/workspace";
 import { Icon } from "./Icon";
@@ -43,50 +43,38 @@ export function ServiceSidebar({
     }
   }, [collapsed]);
   const [dropTarget, setDropTarget] = useState<string>();
-  const dragType = "application/x-service-manager-service";
-  function dropProps(target?: string) {
-    const key = target ?? "ungrouped";
-    return {
-      onDragOver: (event: DragEvent<HTMLElement>) => {
-        if (busy || !event.dataTransfer.types.includes(dragType)) return;
-        event.preventDefault();
-        event.dataTransfer.dropEffect = "move";
-        setDropTarget(key);
-      },
-      onDragLeave: (event: DragEvent<HTMLElement>) => {
-        if (
-          !(event.relatedTarget instanceof Node) ||
-          !event.currentTarget.contains(event.relatedTarget)
-        )
-          setDropTarget(undefined);
-      },
-      onDrop: (event: DragEvent<HTMLElement>) => {
-        setDropTarget(undefined);
-        if (busy || !event.dataTransfer.types.includes(dragType)) return;
-        event.preventDefault();
-        event.stopPropagation();
-        try {
-          const value: unknown = JSON.parse(
-            event.dataTransfer.getData(dragType),
-          );
-          if (
-            !value ||
-            typeof value !== "object" ||
-            !("projectId" in value) ||
-            !("serviceId" in value)
-          )
-            return;
-          const entry = services.find(
-            (e) =>
-              e.project.id === value.projectId &&
-              e.service.id === value.serviceId,
-          );
-          if (entry) onMove(serviceRef(entry), target);
-        } catch {
-          /* Ignore external or malformed drag payloads. */
-        }
-      },
-    };
+  const drag = useRef<
+    | {
+        pointerId: number;
+        service: ServiceRef;
+        x: number;
+        y: number;
+        active: boolean;
+      }
+    | undefined
+  >(undefined);
+  const suppressClick = useRef(false);
+  function targetAt(event: PointerEvent<HTMLElement>) {
+    return document
+      .elementFromPoint(event.clientX, event.clientY)
+      ?.closest<HTMLElement>("[data-service-drop]");
+  }
+  function cancelDrag() {
+    drag.current = undefined;
+    setDropTarget(undefined);
+  }
+  function movePointer(event: PointerEvent<HTMLElement>) {
+    const current = drag.current;
+    if (!current || current.pointerId !== event.pointerId) return;
+    if (
+      Math.hypot(event.clientX - current.x, event.clientY - current.y) < 5 &&
+      !current.active
+    )
+      return;
+    current.active = true;
+    suppressClick.current = true;
+    event.preventDefault();
+    setDropTarget(targetAt(event)?.dataset.serviceDrop);
   }
   const grouped = new Set(groups.flatMap((g) => g.services.map(refKey)));
   function row(entry: ServiceEntry) {
@@ -99,16 +87,37 @@ export function ServiceSidebar({
         aria-label={`${service.name} ${stateLabel(state)}`}
         className={`service-row ${selected === key ? "selected" : ""}`}
         title={`${project.path}/${service.cwd} · Drag to a group or Ungrouped`}
-        draggable={!busy}
-        onDragStart={(event) => {
-          event.dataTransfer.effectAllowed = "move";
-          event.dataTransfer.setData(
-            dragType,
-            JSON.stringify(serviceRef(entry)),
-          );
+        draggable={false}
+        onPointerDown={(event) => {
+          suppressClick.current = false;
+          if (busy || event.button !== 0) return;
+          drag.current = {
+            pointerId: event.pointerId,
+            service: serviceRef(entry),
+            x: event.clientX,
+            y: event.clientY,
+            active: false,
+          };
+          event.currentTarget.setPointerCapture(event.pointerId);
         }}
-        onDragEnd={() => setDropTarget(undefined)}
-        onClick={() => onService(entry)}
+        onPointerMove={movePointer}
+        onPointerUp={(event) => {
+          const current = drag.current;
+          if (!current || current.pointerId !== event.pointerId) return;
+          const target = current.active && !busy ? targetAt(event) : undefined;
+          cancelDrag();
+          if (current.active && !busy && target)
+            onMove(current.service, target.dataset.serviceDrop || undefined);
+        }}
+        onKeyDown={(event) => {
+          if (event.key === "Escape") cancelDrag();
+        }}
+        onPointerCancel={cancelDrag}
+        onLostPointerCapture={cancelDrag}
+        onClick={() => {
+          if (!suppressClick.current) onService(entry);
+          suppressClick.current = false;
+        }}
       >
         <span className="drag-grip">
           <Icon name="grip" size={12} />
@@ -149,7 +158,7 @@ export function ServiceSidebar({
               aria-label={`Move service to group ${g.name}`}
               className={`workspace-group ${dropTarget === g.id ? "drop-active" : ""}`}
               key={g.id}
-              {...dropProps(g.id)}
+              data-service-drop={g.id}
             >
               <div className="project-header group-header">
                 <button
@@ -207,8 +216,8 @@ export function ServiceSidebar({
         <section
           role="region"
           aria-label="Move service to Ungrouped"
-          className={`ungrouped-drop ${dropTarget === "ungrouped" ? "drop-active" : ""}`}
-          {...dropProps()}
+          className={`ungrouped-drop ${dropTarget === "" ? "drop-active" : ""}`}
+          data-service-drop=""
         >
           <div className="sidebar-label">Ungrouped</div>
           {services.filter((e) => !grouped.has(refKey(serviceRef(e)))).map(row)}

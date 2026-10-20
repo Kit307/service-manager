@@ -162,24 +162,7 @@ it("drags an existing service to Ungrouped then into a group without editing def
   });
   render(<App />);
   const row = await screen.findByRole("button", { name: "Web Stopped" });
-  expect(row).toHaveAttribute("draggable", "true");
-  const payload: Record<string, string> = {};
-  const dataTransfer = {
-    setData: (type: string, value: string) => {
-      payload[type] = value;
-    },
-    getData: (type: string) => payload[type] ?? "",
-    types: ["application/x-service-manager-service"],
-    effectAllowed: "",
-    dropEffect: "",
-  };
-  fireEvent.dragStart(row, { dataTransfer });
-  fireEvent.dragOver(screen.getByLabelText("Move service to Ungrouped"), {
-    dataTransfer,
-  });
-  fireEvent.drop(screen.getByLabelText("Move service to Ungrouped"), {
-    dataTransfer,
-  });
+  pointerDrag(row, screen.getByLabelText("Move service to Ungrouped"));
   await waitFor(() =>
     expect(api.moveService).toHaveBeenCalledWith(
       { projectId: "p", serviceId: "web" },
@@ -193,12 +176,10 @@ it("drags an existing service to Ungrouped then into a group without editing def
         .closest(".workspace-group"),
     ).toBeNull(),
   );
-  fireEvent.dragStart(screen.getByRole("button", { name: "Web Stopped" }), {
-    dataTransfer,
-  });
-  fireEvent.drop(screen.getByLabelText("Move service to group Demo"), {
-    dataTransfer,
-  });
+  pointerDrag(
+    screen.getByRole("button", { name: "Web Stopped" }),
+    screen.getByLabelText("Move service to group Demo"),
+  );
   await waitFor(() =>
     expect(api.moveService).toHaveBeenLastCalledWith(
       { projectId: "p", serviceId: "web" },
@@ -213,31 +194,52 @@ it("drags an existing service to Ungrouped then into a group without editing def
     ).not.toBeNull(),
   );
 });
-it("rejects foreign drag payloads and preserves membership when saving fails", async () => {
+it("ignores outside drops and cancelled drags; preserves membership when saving fails", async () => {
   render(<App />);
   const row = await screen.findByRole("button", { name: "Web Stopped" });
   const target = screen.getByLabelText("Move service to Ungrouped");
-  fireEvent.drop(target, {
-    dataTransfer: { getData: () => "not-json", types: ["text/plain"] },
-  });
-  fireEvent.drop(target, {
-    dataTransfer: {
-      getData: () => JSON.stringify({ projectId: "foreign", serviceId: "web" }),
-      types: ["application/x-service-manager-service"],
-    },
-  });
+  pointerDrag(row, document.body);
+  fireEvent.pointerDown(row, { button: 0, clientX: 10, clientY: 10 });
+  fireEvent.pointerMove(row, { clientX: 50, clientY: 50 });
+  fireEvent.pointerCancel(row);
+  fireEvent.pointerUp(row, { clientX: 50, clientY: 50 });
   expect(api.moveService).not.toHaveBeenCalled();
   vi.mocked(api.moveService).mockRejectedValue({
     message: "Could not move service",
   });
-  fireEvent.drop(target, {
-    dataTransfer: {
-      getData: () => JSON.stringify({ projectId: "p", serviceId: "web" }),
-      types: ["application/x-service-manager-service"],
-    },
-  });
+  pointerDrag(row, target);
   expect(await screen.findByRole("alert")).toHaveTextContent(
     "Could not move service",
   );
   expect(row.closest(".workspace-group")).not.toBeNull();
 });
+
+it("keeps clicks as selection and cancels a drag with Escape", async () => {
+  render(<App />);
+  const row = await screen.findByRole("button", { name: "Web Stopped" });
+  Object.defineProperty(document, "elementFromPoint", {
+    configurable: true,
+    value: () => screen.getByLabelText("Move service to Ungrouped"),
+  });
+  fireEvent.pointerDown(row, { button: 0, clientX: 10, clientY: 10 });
+  fireEvent.pointerMove(row, { clientX: 11, clientY: 11 });
+  fireEvent.pointerUp(row, { clientX: 11, clientY: 11 });
+  expect(api.moveService).not.toHaveBeenCalled();
+  fireEvent.click(row);
+  expect(screen.getByRole("button", { name: "Output" })).toBeVisible();
+  fireEvent.pointerDown(row, { button: 0, clientX: 10, clientY: 10 });
+  fireEvent.pointerMove(row, { clientX: 50, clientY: 50 });
+  fireEvent.keyDown(row, { key: "Escape" });
+  fireEvent.pointerUp(row, { clientX: 50, clientY: 50 });
+  expect(api.moveService).not.toHaveBeenCalled();
+});
+
+function pointerDrag(row: HTMLElement, target: HTMLElement) {
+  Object.defineProperty(document, "elementFromPoint", {
+    configurable: true,
+    value: () => target,
+  });
+  fireEvent.pointerDown(row, { button: 0, clientX: 10, clientY: 10 });
+  fireEvent.pointerMove(row, { clientX: 50, clientY: 50 });
+  fireEvent.pointerUp(row, { clientX: 50, clientY: 50 });
+}

@@ -54,7 +54,12 @@ export default function App() {
   const [groupId, setGroupId] = useState("");
   const [results, setResults] = useState<ActionResult[]>([]);
   const [busy, setBusy] = useState(false);
-  const [draftRevision, setDraftRevision] = useState("absent");
+  const [draft, setDraft] = useState<{
+    projectId: string;
+    serviceId: string;
+    revision: string;
+    definition?: ServiceDefinition;
+  }>();
   const [error, setError] = useState("");
   const [logs, setLogs] = useState<LogRecord[]>([]);
   const [gap, setGap] = useState(false);
@@ -186,6 +191,7 @@ export default function App() {
     if (projectId !== p.id || serviceId !== next) {
       setLogs([]);
       setGap(false);
+      setDraft(undefined);
     }
     if (next)
       setGroupId(
@@ -199,10 +205,25 @@ export default function App() {
     setError("");
   }
   function beginEdit(mode: "new" | "settings", p = project) {
-    if (p) {
-      setDraftRevision(p.revision);
-      setView(mode);
+    if (!p) return;
+    const id = mode === "new" ? "" : serviceId;
+    if (mode === "new" || draft?.projectId !== p.id || draft.serviceId !== id) {
+      setDraft({
+        projectId: p.id,
+        serviceId: id,
+        revision: p.revision,
+        definition:
+          mode === "settings"
+            ? p.config.services.find((s) => s.id === id)
+            : undefined,
+      });
     }
+    setView(mode);
+  }
+  function cancelEdit() {
+    setDraft(undefined);
+    if (service) setView("service");
+    else overview();
   }
   async function perform(action: () => Promise<unknown>) {
     setBusy(true);
@@ -220,6 +241,7 @@ export default function App() {
     setGroupId(id);
     setView("workspace");
     setResults([]);
+    setDraft(undefined);
     setError("");
     setProjectId("");
     setServiceId("");
@@ -320,15 +342,16 @@ export default function App() {
     });
   }
   async function save(definition: ServiceDefinition) {
-    if (!project) return;
+    if (!project || !draft) return;
     await perform(async () => {
       const saved = await api.saveService(
         project.id,
         definition,
-        draftRevision,
+        draft.revision,
       );
       setProjectId(saved.id);
       setServiceId(definition.id);
+      setDraft(undefined);
       setView("service");
       if (view === "new" && group) {
         try {
@@ -363,7 +386,16 @@ export default function App() {
   }
 
   return (
-    <div className="app-shell">
+    <div
+      className={`app-shell${isDesktop() && /Mac/.test(navigator.platform) ? " mac-window" : ""}`}
+    >
+      {isDesktop() && /Mac/.test(navigator.platform) && (
+        <div
+          className="window-drag-region"
+          data-tauri-drag-region
+          aria-hidden="true"
+        />
+      )}
       <aside className="sidebar" aria-label="Services">
         <div className="brand">
           <span className="brand-mark">
@@ -526,24 +558,16 @@ export default function App() {
               void addService();
             }}
           />
-        ) : view === "new" || view === "settings" ? (
+        ) : view === "new" ? (
           <div className="editor-scroll">
             <p className="editor-root">Working folder: {project.path}</p>
             <ServiceEditor
-              key={view === "new" ? `new-${project.id}` : serviceId}
-              service={view === "settings" ? service : undefined}
+              key={`new-${project.id}`}
               saving={busy}
               onSave={(d) => {
                 void save(d);
               }}
-              onCancel={() => (service ? setView("service") : overview())}
-              onRemove={
-                view === "settings" && service && !active
-                  ? () => {
-                      void remove();
-                    }
-                  : undefined
-              }
+              onCancel={cancelEdit}
             />
           </div>
         ) : !service ? null : (
@@ -652,11 +676,19 @@ export default function App() {
               )}
             </section>
             <div className="service-tabs">
-              <button className="selected">
+              <button
+                className={view === "service" ? "selected" : ""}
+                aria-pressed={view === "service"}
+                onClick={() => setView("service")}
+              >
                 <Icon name="terminal" size={14} />
                 Output
               </button>
-              <button onClick={() => beginEdit("settings")}>
+              <button
+                className={view === "settings" ? "selected" : ""}
+                aria-pressed={view === "settings"}
+                onClick={() => beginEdit("settings")}
+              >
                 <Icon name="settings" size={14} />
                 Settings
               </button>
@@ -666,18 +698,46 @@ export default function App() {
                   : "No health check configured"}
               </span>
             </div>
-            <LogPanel
-              key={`${project.id}/${service.id}`}
-              logs={logs}
-              active={active}
-              gap={gap}
-              onClear={() => {
-                void perform(async () => {
-                  await api.clearLogs(project.id, service.id);
-                  setLogs([]);
-                });
-              }}
-            />
+            <div className="service-pane" hidden={view === "settings"}>
+              <LogPanel
+                key={`${project.id}/${service.id}`}
+                logs={logs}
+                active={active}
+                gap={gap}
+                onClear={() => {
+                  void perform(async () => {
+                    await api.clearLogs(project.id, service.id);
+                    setLogs([]);
+                  });
+                }}
+              />
+            </div>
+            {draft?.projectId === project.id &&
+              draft.serviceId === service.id && (
+                <section
+                  className="editor-scroll service-settings"
+                  aria-label="Service settings"
+                  hidden={view !== "settings"}
+                >
+                  <p className="editor-root">Working folder: {project.path}</p>
+                  <ServiceEditor
+                    key={`${draft.projectId}/${draft.serviceId}/${draft.revision}`}
+                    service={draft.definition}
+                    saving={busy}
+                    onSave={(d) => {
+                      void save(d);
+                    }}
+                    onCancel={cancelEdit}
+                    onRemove={
+                      !active
+                        ? () => {
+                            void remove();
+                          }
+                        : undefined
+                    }
+                  />
+                </section>
+              )}
           </>
         )}
       </main>

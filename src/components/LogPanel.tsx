@@ -2,6 +2,44 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { LogRecord } from "../lib/types";
 import { Icon } from "./Icon";
 
+// shortcut: supports JSON string levels and prefixed console levels; extend for demonstrated logger formats.
+function severity(text: string): "error" | "warning" | "info" | "unknown" {
+  let level: unknown;
+  if (text.trimStart().startsWith("{")) {
+    try {
+      const value: unknown = JSON.parse(text);
+      if (value && typeof value === "object" && "level" in value)
+        level = value.level;
+    } catch {
+      return "unknown";
+    }
+  } else {
+    // Only a level at the start (after an optional timestamp) is a severity hint.
+    level = text
+      .trimStart()
+      .match(
+        /^(?:\d{4}-\d{2}-\d{2}[T ][\d:.+-]+Z?\s+)?\[?(ERROR|ERR|FATAL|PANIC|WARNING|WARN|WRN|INFO|INF)\]?(?=\s|:|$)/i,
+      )?.[1];
+  }
+  if (typeof level !== "string") return "unknown";
+  switch (level.toLowerCase()) {
+    case "error":
+    case "err":
+    case "fatal":
+    case "panic":
+      return "error";
+    case "warning":
+    case "warn":
+    case "wrn":
+      return "warning";
+    case "info":
+    case "inf":
+      return "info";
+    default:
+      return "unknown";
+  }
+}
+
 export function LogPanel({
   logs,
   active,
@@ -132,18 +170,24 @@ export function LogPanel({
           </div>
         ) : (
           visible.map((line) => (
-            <div className={`log-line ${line.stream}`} key={line.seq}>
+            <div
+              className={`log-line ${line.stream} severity-${severity(line.text)}`}
+              key={line.seq}
+            >
               <time>
                 {new Date(line.timestamp).toLocaleTimeString("en-GB", {
                   hour12: false,
                 })}
               </time>
-              <span className="log-stream">
-                {line.stream === "stderr"
-                  ? "err"
-                  : line.stream === "system"
-                    ? "sys"
-                    : "out"}
+              <span
+                className="log-stream"
+                title={
+                  line.stream === "stderr"
+                    ? "Standard error stream; this may include informational logs."
+                    : `Output stream: ${line.stream}`
+                }
+              >
+                {line.stream}
               </span>
               <pre>
                 {line.text}

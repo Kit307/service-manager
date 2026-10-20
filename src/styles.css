@@ -154,6 +154,18 @@ pre {
   padding: 22px 12px 0;
   user-select: none;
 }
+.mac-window .sidebar {
+  padding-top: 42px;
+}
+.window-drag-region {
+  position: fixed;
+  top: 0;
+  left: 78px;
+  right: 0;
+  height: 28px;
+  z-index: 10;
+  user-select: none;
+}
 .brand {
   display: flex;
   align-items: center;
@@ -730,7 +742,7 @@ kbd {
 .log-stream {
   font-size: 9px;
   color: var(--subtle);
-  width: 23px;
+  width: 44px;
   flex-shrink: 0;
   user-select: none;
   padding-top: 2px;
@@ -742,9 +754,13 @@ kbd {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
-.log-line.stderr pre,
-.log-line.stderr .log-stream {
+.log-line.severity-error pre,
+.log-line.severity-error .log-stream {
   color: var(--red);
+}
+.log-line.severity-warning pre,
+.log-line.severity-warning .log-stream {
+  color: var(--amber);
 }
 .log-line.system pre {
   color: var(--muted);
@@ -1223,10 +1239,11 @@ label small {
   overflow-wrap: anywhere;
 }
 
-.service-row[draggable="true"] {
+.service-row {
+  touch-action: none;
   cursor: grab;
 }
-.service-row[draggable="true"]:active {
+.service-row:active {
   cursor: grabbing;
 }
 .drag-grip {
@@ -1252,4 +1269,21 @@ label small {
   font-size: 10px;
   line-height: 1.5;
   margin: 8px 12px;
+}
+
+.service-pane {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+.service-pane[hidden],
+.service-settings[hidden] {
+  display: none;
+}
+.service-settings {
+  min-height: 0;
+}
+.service-settings .service-form {
+  padding-top: 16px;
 }

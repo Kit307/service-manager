@@ -2,7 +2,7 @@
 
 A desktop app for running project services without typing commands in a terminal.
 
-Version 0.5.0 implements the local desktop workflow: command and owned Docker Compose services, project configuration, live logs, loopback health checks, and authenticated MCP/proxy access share one Rust manager. This is a local macOS development release without Developer ID signing or notarization.
+Version 0.5.1 implements the local desktop workflow: command and owned Docker Compose services, project configuration, live logs, loopback health checks, and authenticated MCP/proxy access share one Rust manager. This is a local macOS development release without Developer ID signing or notarization.
 
 ## Selected stack
 
@@ -29,7 +29,7 @@ The [implementation plan](docs/superpowers/plans/2026-10-16-service-manager-plan
 
 AI Connections can bootstrap an empty workspace: select an allowed parent folder when creating a client profile. MCP can then discover its allowed roots, create new empty project folders, or open existing code folders itself. Its configured services appear directly in the same app; one token controls all registered services and nothing runs automatically. See [AI connections](docs/ai-connections.md).
 
-Window minimization is disabled; manual resizing remains available and startup uses the normal window size. Open Service Manager, choose Add service, select its working folder, and add a command or Docker Compose service. Save the definition, review it on Run, and approve its exact configuration before first execution. Settings and commands persist in `.service-manager/project.json`. Existing malformed files are preserved and reported as errors.
+The macOS title strip is replaced by content with native window controls retained. Drag the top area to move the window; resize its edges down to 900 × 600. Dock minimization remains disabled and startup uses the normal window size. Open Service Manager, choose Add service, select its working folder, and add a command or Docker Compose service. Save the definition, review it on Run, and approve its exact configuration before first execution. Settings and commands persist in `.service-manager/project.json`. Existing malformed files are preserved and reported as errors.
 
 Run supports foreground noninteractive commands such as `pnpm dev` and `go run ./cmd/api`. Stop signals the owned process group, escalates after five seconds, and waits for cleanup. Opening a folder does not execute anything. Running and Ready remain different states; configure a loopback health check to establish readiness.
 
@@ -72,8 +72,16 @@ Compose requires a running local Unix-socket Docker context and locally availabl
 
 The supported Compose subset is one foreground long-running container per service. Scaling overrides, explicit container names, profiles, external resources, Compose secrets/configs, and remote Docker contexts are rejected with a readable error. Use a command service for existing custom workflows; its command still has normal user permissions. The app does not install tools, build images, or pull missing images automatically.
 
+## Service views and log levels
+
+Output and Settings share the service heading, live status and lifecycle controls. Settings scrolls within the content pane. Switching tabs preserves log filters/follow and unsaved settings; Cancel discards the draft. Saving retains the revision captured when editing began, so background refresh cannot silently overwrite external changes.
+
+Stream labels are `stdout`, `stderr` and `system`; stderr is not itself a severity level. Only an explicit recognized console prefix or JSON string `level` colors a line: errors red and warnings amber. Informational and unknown formats stay neutral, regardless of stream. Message content, raw stream identity and MCP/proxy output are preserved. Numeric levels and arbitrary logger formats are not inferred.
+
 ## Runtime limits
 
 Output is retained in memory with per-service/global bounds. The desktop receives change events in 100 ms batches and fetches bounded pages; it does not continually poll logs while idle. Configuration changes on disk are checked every two seconds. Health checks expose a diagnostic after 30 seconds without success and continue checking for recovery.
 
 No public signing, notarization, publishing, auto-update, SSH, remote control, dependency graph, automatic restart, persistent log archive, or deployment is included. The original plan's broader acceptance matrix is tracked honestly in [verification](docs/verification.md), including measured limits and untested surfaces.
+
+Service rows use captured pointer movement for group changes, avoiding native WebKit HTML drag interception. Drag onto a group, including a collapsed group, or onto Ungrouped to remove membership. Escape, pointer cancellation and drops outside these targets leave membership unchanged. Group Settings remains the keyboard-accessible alternative.

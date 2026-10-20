@@ -1,3 +1,9 @@
+# Service Manager 0.5.1 verification
+
+37 frontend tests passed, plus ESLint and TypeScript. Informational stderr is neutral and explicit recognized error/warning levels determine color; raw streams/text remain unchanged. Real Chromium checks verified computed colors and shared service-heading bounds, Settings below the tabs, retained draft/log search and internal scrolling. Creation and stale revision protection remain covered. Isolated native WebKit pointer checks verified moving a service out of a group and into another, including direct cross-group movement. Native titlebar overlay retains traffic lights; resizing clamps at 900 × 600. See `.agents/evidence/TASK-0012/` for details and release evidence.
+
+No backend lifecycle/authorization behavior changed. Rust runtime/Docker/model-session tests were not repeated; native packaging is compiled during release. The GUI fixture uses synthetic API state; real services, installed app and client credentials remain untouched. All previous verification sections below are historical.
+
 # Service Manager 0.5.0 verification
 
 - Frontend: 21 tests in 5 files passed, including token setup without scope selection, typed drag/drop and persistence errors, icon action mapping, existing group/bulk/editor/log behavior. Typecheck/build and ESLint passed.
