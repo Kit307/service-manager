@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, expect, it, vi } from "vitest";
 import App from "../App";
@@ -20,6 +20,7 @@ vi.mock("../lib/api", async (importOriginal) => {
       runHistory: vi.fn(),
       inspectPorts: vi.fn(),
       diagnose: vi.fn(),
+      moveService: vi.fn(),
     },
   };
 });
@@ -108,4 +109,45 @@ it("opens full service output from the sidebar and retains separate workspace ta
   expect(screen.getAllByRole("tab")).toHaveLength(2);
   expect(api.control).not.toHaveBeenCalled();
   expect(api.controlSequence).not.toHaveBeenCalled();
+});
+
+it("drops sidebar services onto Log workspace to open or focus tabs without mutations", async () => {
+  render(<App />);
+  const one = await screen.findByRole("button", { name: "One Running" });
+  const two = screen.getByRole("button", { name: "Two Stopped" });
+  const target = screen.getByRole("button", { name: "Log workspace" });
+  const originalHitTest = Object.getOwnPropertyDescriptor(document, "elementFromPoint");
+  Object.defineProperty(document, "elementFromPoint", {
+    configurable: true,
+    value: () => target.querySelector("svg"),
+  });
+  const start = (row: HTMLElement) => {
+    fireEvent.pointerDown(row, { button: 0, pointerId: 1, clientX: 10, clientY: 10 });
+    fireEvent.pointerMove(row, { pointerId: 1, clientX: 50, clientY: 50 });
+  };
+  const drop = (row: HTMLElement) => {
+    start(row);
+    expect(target).toHaveClass("drop-active");
+    fireEvent.pointerUp(row, { pointerId: 1, clientX: 50, clientY: 50 });
+    fireEvent.click(row);
+    expect(target).not.toHaveClass("drop-active");
+  };
+  start(one);
+  fireEvent.pointerCancel(one, { pointerId: 1 });
+  fireEvent.pointerUp(one, { pointerId: 1, clientX: 50, clientY: 50 });
+  expect(target).not.toHaveClass("drop-active");
+  expect(screen.queryByRole("tab")).not.toBeInTheDocument();
+  drop(one);
+  expect(await screen.findByRole("tab", { name: "One Running" })).toHaveAttribute("aria-selected", "true");
+  drop(two);
+  expect(screen.getByRole("tab", { name: "Two Stopped" })).toHaveAttribute("aria-selected", "true");
+  drop(one);
+  expect(screen.getAllByRole("tab")).toHaveLength(2);
+  expect(screen.getByRole("tab", { name: "One Running" })).toHaveAttribute("aria-selected", "true");
+  expect(api.moveService).not.toHaveBeenCalled();
+  expect(api.control).not.toHaveBeenCalled();
+  expect(api.controlSequence).not.toHaveBeenCalled();
+  expect(workspace.groups[0].services).toHaveLength(2);
+  if (originalHitTest) Object.defineProperty(document, "elementFromPoint", originalHitTest);
+  else Reflect.deleteProperty(document, "elementFromPoint");
 });

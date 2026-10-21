@@ -12,6 +12,8 @@ export function ServiceSidebar({
   onGroup,
   onEdit,
   onMove,
+  onLogs,
+  onLogHover,
 }: {
   services: ServiceEntry[];
   groups: WorkspaceGroup[];
@@ -22,6 +24,8 @@ export function ServiceSidebar({
   onGroup: (id: string) => void;
   onEdit: (id: string) => void;
   onMove: (service: ServiceRef, groupId?: string) => void;
+  onLogs: (service: ServiceRef) => void;
+  onLogHover: (hovering: boolean) => void;
 }) {
   const [collapsed, setCollapsed] = useState<string[]>(() => {
     try {
@@ -57,11 +61,12 @@ export function ServiceSidebar({
   function targetAt(event: PointerEvent<HTMLElement>) {
     return document
       .elementFromPoint(event.clientX, event.clientY)
-      ?.closest<HTMLElement>("[data-service-drop]");
+      ?.closest<HTMLElement>("[data-service-drop], [data-service-log-drop]");
   }
   function cancelDrag() {
     drag.current = undefined;
     setDropTarget(undefined);
+    onLogHover(false);
   }
   function movePointer(event: PointerEvent<HTMLElement>) {
     const current = drag.current;
@@ -74,7 +79,9 @@ export function ServiceSidebar({
     current.active = true;
     suppressClick.current = true;
     event.preventDefault();
-    setDropTarget(targetAt(event)?.dataset.serviceDrop);
+    const target = targetAt(event);
+    setDropTarget(target?.dataset.serviceDrop);
+    onLogHover(target?.hasAttribute("data-service-log-drop") ?? false);
   }
   const grouped = new Set(groups.flatMap((g) => g.services.map(refKey)));
   function row(entry: ServiceEntry) {
@@ -86,7 +93,7 @@ export function ServiceSidebar({
         key={key}
         aria-label={`${service.name} ${stateLabel(state)}`}
         className={`service-row ${selected === key ? "selected" : ""}`}
-        title={`${project.path}/${service.cwd} · Drag to a group or Ungrouped`}
+        title={`${project.path}/${service.cwd} · Drag to a group, Ungrouped or Log workspace`}
         draggable={false}
         onPointerDown={(event) => {
           suppressClick.current = false;
@@ -106,8 +113,11 @@ export function ServiceSidebar({
           if (!current || current.pointerId !== event.pointerId) return;
           const target = current.active && !busy ? targetAt(event) : undefined;
           cancelDrag();
-          if (current.active && !busy && target)
-            onMove(current.service, target.dataset.serviceDrop || undefined);
+          if (target) {
+            if (target.hasAttribute("data-service-log-drop"))
+              onLogs(current.service);
+            else onMove(current.service, target.dataset.serviceDrop || undefined);
+          }
         }}
         onKeyDown={(event) => {
           if (event.key === "Escape") cancelDrag();

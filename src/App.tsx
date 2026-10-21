@@ -56,6 +56,7 @@ export default function App() {
   >("workspace");
   const [logRequest, setLogRequest] = useState<{ ref: ServiceRef; id: number }>();
   const [focusedLog, setFocusedLog] = useState<ServiceRef>();
+  const [logDropActive, setLogDropActive] = useState(false);
   const [groupId, setGroupId] = useState("");
   const [results, setResults] = useState<ActionResult[]>([]);
   const [busy, setBusy] = useState(false);
@@ -463,6 +464,8 @@ export default function App() {
           busy={busy}
           onService={({ project: p, service: s }) => select(p, s.id)}
           onGroup={overview}
+          onLogs={openLogs}
+          onLogHover={setLogDropActive}
           onMove={(ref, target) => {
             void moveService(ref, target);
           }}
@@ -474,7 +477,9 @@ export default function App() {
         />
         <div className="sidebar-bottom">
           <button
-            className={`ai-nav ${view === "logs" ? "selected" : ""}`}
+            className={`ai-nav ${view === "logs" ? "selected" : ""} ${logDropActive ? "drop-active" : ""}`}
+            data-service-log-drop=""
+            title="Open log workspace or drop a service to open its log tab"
             onClick={() => openLogs()}
           >
             <Icon name="terminal" />
