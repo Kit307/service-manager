@@ -10,6 +10,9 @@ fn command(cwd: &str) -> ServiceDefinition {
         },
         env_file: None,
         health_check: None,
+        ports: vec![],
+        url: None,
+        depends_on: vec![],
     }
 }
 #[test]

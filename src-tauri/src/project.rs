@@ -130,6 +130,9 @@ pub fn read_config(root: &Path) -> Result<(ProjectConfig, String)> {
                         "file",
                         "envFile",
                         "healthCheck",
+                        "ports",
+                        "url",
+                        "dependsOn",
                     ]
                     .contains(&k.as_str())
                 })

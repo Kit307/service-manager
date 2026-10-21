@@ -138,6 +138,26 @@ impl LogStore {
             self.evict(key);
         }
     }
+    pub fn read_run(&self, key: &str, run: &str) -> LogPage {
+        let records: Vec<_> = self
+            .entries
+            .get(key)
+            .into_iter()
+            .flatten()
+            .filter(|r| r.run_id == run)
+            .cloned()
+            .collect();
+        let next_cursor = records
+            .last()
+            .map(|r| r.seq)
+            .unwrap_or(self.seq)
+            .to_string();
+        LogPage {
+            records,
+            next_cursor,
+            truncated: self.evicted.contains_key(key),
+        }
+    }
     pub fn revision(&self) -> u64 {
         self.seq
     }

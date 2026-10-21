@@ -14,6 +14,9 @@ async fn trusted_service_starts_once_and_collects_output() {
         },
         env_file: None,
         health_check: None,
+        ports: vec![],
+        url: None,
+        depends_on: vec![],
     };
     store
         .save(
@@ -105,6 +108,9 @@ async fn shutdown_blocks_new_runs_and_escalates_a_process_that_ignores_sigterm()
         },
         env_file: None,
         health_check: None,
+        ports: vec![],
+        url: None,
+        depends_on: vec![],
     };
     let saved = manager
         .save(&p.id, definition, "absent", false)
@@ -171,20 +177,30 @@ async fn shutdown_blocks_new_runs_and_escalates_a_process_that_ignores_sigterm()
 
 #[tokio::test]
 async fn readiness_requires_an_actual_successful_loopback_response() {
-    use tokio::io::AsyncWriteExt;
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let port = listener.local_addr().unwrap().port();
-    let http = tokio::spawn(async move {
-        loop {
-            let Ok((mut socket, _)) = listener.accept().await else {
-                break;
-            };
-            let _ = socket
-                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nOK")
-                .await;
-        }
-    });
+    let available = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = available.local_addr().unwrap().port();
+    drop(available);
     let root = tempfile::tempdir().unwrap();
+    std::fs::write(
+        root.path().join("health_fixture.py"),
+        r#"import http.server
+import pathlib
+import signal
+import sys
+
+signal.alarm(20)
+class Health(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        status = 200 if pathlib.Path("ready").exists() else 503
+        self.send_response(status)
+        self.end_headers()
+        self.wfile.write(b"fixture")
+        print(f"health-status-{status}", flush=True)
+
+http.server.HTTPServer(("127.0.0.1", int(sys.argv[1])), Health).serve_forever()
+"#,
+    )
+    .unwrap();
     let state = tempfile::tempdir().unwrap();
     let manager = Manager::new(state.path().into()).unwrap();
     let p = manager.open(root.path().to_str().unwrap()).await.unwrap();
@@ -193,9 +209,12 @@ async fn readiness_requires_an_actual_successful_loopback_response() {
         name: "Health fixture".into(),
         cwd: ".".into(),
         kind: ServiceKind::Command {
-            command: "sleep 60".into(),
+            command: format!("exec /usr/bin/python3 -u health_fixture.py {port}"),
         },
         env_file: None,
+        ports: vec![],
+        url: None,
+        depends_on: vec![],
         health_check: Some(HealthCheck {
             url: format!("http://127.0.0.1:{port}/health"),
         }),
@@ -221,9 +240,33 @@ async fn readiness_requires_an_actual_successful_loopback_response() {
         }
     }
     let _cleanup = Cleanup(initial.pid.unwrap());
-    assert_eq!(initial.state, "running");
+    assert_eq!(initial.state, "starting");
+    let mut served_unhealthy = false;
+    for _ in 0..80 {
+        if manager
+            .read_logs(&p.id, "health", None)
+            .await
+            .unwrap()
+            .records
+            .iter()
+            .any(|line| line.text == "health-status-503")
+        {
+            served_unhealthy = true;
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    assert!(
+        served_unhealthy,
+        "the service must actually serve an unsuccessful health response"
+    );
+    assert_eq!(
+        manager.status(&p.id, "health").await.unwrap().state,
+        "starting"
+    );
+    std::fs::write(root.path().join("ready"), "ready").unwrap();
     let mut ready = false;
-    for _ in 0..40 {
+    for _ in 0..80 {
         if manager.status(&p.id, "health").await.unwrap().state == "ready" {
             ready = true;
             break;
@@ -231,7 +274,6 @@ async fn readiness_requires_an_actual_successful_loopback_response() {
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
     }
     manager.shutdown().await.unwrap();
-    http.abort();
     assert!(
         ready,
         "running must become ready only after the real HTTP response"

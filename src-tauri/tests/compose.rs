@@ -68,6 +68,9 @@ async fn compose_owns_one_stack_and_stop_uses_the_launch_snapshot() {
         },
         env_file: None,
         health_check: None,
+        ports: vec![],
+        url: None,
+        depends_on: vec![],
     };
     let saved = manager
         .save(&p.id, definition, "absent", false)

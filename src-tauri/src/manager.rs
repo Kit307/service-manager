@@ -11,7 +11,7 @@ use std::{
     path::{Path, PathBuf},
     process::Stdio,
     sync::{
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
         Arc,
     },
     time::Duration,
@@ -26,11 +26,19 @@ pub struct Manager {
     pub store: Arc<Mutex<ProjectStore>>,
     pub logs: Arc<Mutex<LogStore>>,
     shutting_down: Arc<AtomicBool>,
+    pub(crate) history: Arc<Mutex<crate::history::HistoryStore>>,
+    pub(crate) sequence_lock: Arc<Mutex<()>>,
+    pub(crate) sequence_generation: Arc<AtomicU64>,
 }
 impl Manager {
     pub fn new(path: PathBuf) -> Result<Self> {
+        let store = ProjectStore::new(path.clone())?;
+        let history = crate::history::HistoryStore::open(&path)?;
         Ok(Self {
-            store: Arc::new(Mutex::new(ProjectStore::new(path)?)),
+            store: Arc::new(Mutex::new(store)),
+            history: Arc::new(Mutex::new(history)),
+            sequence_lock: Arc::new(Mutex::new(())),
+            sequence_generation: Arc::new(AtomicU64::new(0)),
             logs: Arc::new(Mutex::new(LogStore::default())),
             shutting_down: Arc::new(AtomicBool::new(false)),
         })
@@ -65,6 +73,17 @@ impl Manager {
         } else {
             p.config.services.push(definition.clone());
         }
+        let mut graph: Vec<_> = store.projects.values().cloned().collect();
+        if let Some(current) = graph.iter_mut().find(|p| p.id == project) {
+            current.config = p.config.clone();
+        }
+        crate::operations::validate_dependencies(
+            &graph,
+            crate::project::ServiceRef {
+                project_id: project.into(),
+                service_id: definition.id.clone(),
+            },
+        )?;
         let saved = store.save(project, p.config, revision)?;
         if trust {
             store.trust(project, &definition.id, &saved.revision)?;
@@ -139,6 +158,23 @@ impl Manager {
                 "Review and trust this service locally before running it.",
             ));
         }
+        for dependency in &definition.depends_on {
+            if !store
+                .projects
+                .get(&dependency.project_id)
+                .and_then(|p| p.runtime.get(&dependency.service_id))
+                .is_some_and(|s| s.state == "ready")
+            {
+                return Err(AppError::new(
+                    "DEPENDENCY_NOT_READY",
+                    "A dependency is not Ready. Start its health-checked service first.",
+                ));
+            }
+        }
+        let conflicts = crate::ports::inspect(&crate::ports::configured_ports(&definition)).await?;
+        if let Some(conflict) = conflicts.first() {
+            return Err(AppError::new("PORT_IN_USE", format!("TCP port {} is used by {} (PID {}). Open Diagnostics to inspect or stop its owner.",conflict.port,conflict.name,conflict.pid)));
+        }
         let cwd = inside(Path::new(&p.path), &definition.cwd)?;
         if matches!(definition.kind, ServiceKind::Compose { .. }) {
             let key = format!("{project}/{service}");
@@ -152,10 +188,23 @@ impl Manager {
             store.persist()?;
             let snapshot = Snapshot {
                 state: "starting".into(),
+                started_at: Some(chrono::Utc::now().to_rfc3339()),
                 run_id: Some(uuid::Uuid::new_v4().to_string()),
                 activity: format!("Compose preflight via {actor}"),
                 ..Snapshot::default()
             };
+            self.history.lock().await.begin(
+                project,
+                service,
+                snapshot.run_id.as_deref().unwrap(),
+                &format!(
+                    "docker compose -f {} up",
+                    match &definition.kind {
+                        ServiceKind::Compose { file } => file,
+                        _ => unreachable!(),
+                    }
+                ),
+            )?;
             store
                 .projects
                 .get_mut(project)
@@ -214,22 +263,51 @@ impl Manager {
         }
         store.private.dirty = true;
         store.persist()?;
-        let mut child = cmd.spawn().map_err(|_| {
-            AppError::new(
-                "PROCESS_START_FAILED",
-                "Could not start the command. Check its working folder and shell.",
-            )
-        })?;
+        let run = uuid::Uuid::new_v4().to_string();
+        self.history
+            .lock()
+            .await
+            .begin(project, service, &run, command)?;
+        let mut child = match cmd.spawn() {
+            Ok(child) => child,
+            Err(_) => {
+                let error = AppError::new(
+                    "PROCESS_START_FAILED",
+                    "Could not start the command. Check its working folder and shell.",
+                );
+                let snapshot = Snapshot {
+                    state: "failed".into(),
+                    run_id: Some(run),
+                    error: Some(error.message.clone()),
+                    activity: "Command could not start".into(),
+                    ..Snapshot::default()
+                };
+                store
+                    .projects
+                    .get_mut(project)
+                    .unwrap()
+                    .runtime
+                    .insert(service.into(), snapshot.clone());
+                drop(store);
+                self.finish_history(project, service, &snapshot).await;
+                return Err(error);
+            }
+        };
         let pid = child.id().ok_or_else(|| {
             AppError::new(
                 "PROCESS_START_FAILED",
                 "The process exited before its identity was available.",
             )
         })?;
-        let run = uuid::Uuid::new_v4().to_string();
         let key = format!("{project}/{service}");
         let snapshot = Snapshot {
-            state: "running".into(),
+            state: if definition.health_check.is_some() {
+                "starting"
+            } else {
+                "running"
+            }
+            .into(),
+            started_at: Some(chrono::Utc::now().to_rfc3339()),
             run_id: Some(run.clone()),
             pid: Some(pid),
             exit_code: None,
@@ -333,7 +411,7 @@ impl Manager {
                     store = manager.store.lock().await;
                 }
             }
-            if let Some(current) = store
+            let terminal = if let Some(current) = store
                 .projects
                 .get_mut(&project_id)
                 .and_then(|p| p.runtime.get_mut(&service_id))
@@ -359,7 +437,10 @@ impl Manager {
                     if stopped { "Stopped" } else { "Process exited" },
                     chrono::Local::now().format("%H:%M:%S")
                 );
-            }
+                current.clone()
+            } else {
+                return;
+            };
             drop(store);
             manager.logs.lock().await.push(
                 &key,
@@ -371,6 +452,9 @@ impl Manager {
                         .unwrap_or_else(|| "signal".into())
                 ),
             );
+            manager
+                .finish_history(&project_id, &service_id, &terminal)
+                .await;
         });
         if let Some(health) = definition.health_check.clone() {
             let manager = self.clone();
@@ -385,6 +469,13 @@ impl Manager {
         Ok(snapshot)
     }
     async fn run_compose(&self, job: crate::compose::ComposeJob) {
+        let project = job.project.clone();
+        let service = job.service.clone();
+        if let Some(terminal) = self.run_compose_inner(job).await {
+            self.finish_history(&project, &service, &terminal).await;
+        }
+    }
+    async fn run_compose_inner(&self, job: crate::compose::ComposeJob) -> Option<Snapshot> {
         use crate::compose::ComposeLaunch;
         let key = format!("{}/{}", job.project, job.service);
         let prepared = ComposeLaunch::prepare(
@@ -399,37 +490,35 @@ impl Manager {
         let launch = match prepared {
             Ok(launch) => launch,
             Err(error) => {
-                if let Some(s) = self
-                    .store
-                    .lock()
-                    .await
+                let mut store = self.store.lock().await;
+                let snapshot = store
                     .projects
-                    .get_mut(&job.project)
-                    .and_then(|p| p.runtime.get_mut(&job.service))
-                {
-                    s.state = "failed".into();
-                    s.error = Some(error.message);
+                    .get_mut(&job.project)?
+                    .runtime
+                    .get_mut(&job.service)?;
+                if snapshot.run_id.as_deref() != Some(&job.run) {
+                    return None;
                 }
-                return;
+                snapshot.state = "failed".into();
+                snapshot.error = Some(error.message);
+                return Some(snapshot.clone());
             }
         };
         // Stop may arrive while preflight is awaiting Docker.
-        if self
-            .status(&job.project, &job.service)
-            .await
-            .is_ok_and(|s| s.state == "stopping")
         {
-            if let Some(s) = self
-                .store
-                .lock()
-                .await
+            let mut store = self.store.lock().await;
+            let snapshot = store
                 .projects
-                .get_mut(&job.project)
-                .and_then(|p| p.runtime.get_mut(&job.service))
-            {
-                s.state = "stopped".into();
+                .get_mut(&job.project)?
+                .runtime
+                .get_mut(&job.service)?;
+            if snapshot.run_id.as_deref() != Some(&job.run) {
+                return None;
             }
-            return;
+            if snapshot.state == "stopping" {
+                snapshot.state = "stopped".into();
+                return Some(snapshot.clone());
+            }
         }
         let mut command = launch.up();
         command
@@ -440,18 +529,18 @@ impl Manager {
         let mut child = match command.spawn() {
             Ok(child) => child,
             Err(_) => {
-                if let Some(s) = self
-                    .store
-                    .lock()
-                    .await
+                let mut store = self.store.lock().await;
+                let snapshot = store
                     .projects
-                    .get_mut(&job.project)
-                    .and_then(|p| p.runtime.get_mut(&job.service))
-                {
-                    s.state = "failed".into();
-                    s.error = Some("Could not launch Docker Compose.".into());
+                    .get_mut(&job.project)?
+                    .runtime
+                    .get_mut(&job.service)?;
+                if snapshot.run_id.as_deref() != Some(&job.run) {
+                    return None;
                 }
-                return;
+                snapshot.state = "failed".into();
+                snapshot.error = Some("Could not launch Docker Compose.".into());
+                return Some(snapshot.clone());
             }
         };
         let runner_pid = child.id().expect("spawned Compose runner has an identity");
@@ -493,10 +582,11 @@ impl Manager {
             });
         }
         let mut exited = false;
+        let mut terminal = None;
         loop {
             let current = match self.status(&job.project, &job.service).await {
-                Ok(s) => s,
-                Err(_) => break,
+                Ok(s) if s.run_id.as_deref() == Some(&job.run) => s,
+                _ => break,
             };
             exited |= child.try_wait().ok().flatten().is_some();
             let stopping = current.state == "stopping";
@@ -532,6 +622,9 @@ impl Manager {
                         .get_mut(&job.project)
                         .and_then(|p| p.runtime.get_mut(&job.service))
                     {
+                        if s.run_id.as_deref() != Some(&job.run) {
+                            break;
+                        }
                         s.error = Some(
                             "Compose runner cleanup is not yet verified. Stop remains in progress."
                                 .into(),
@@ -582,6 +675,7 @@ impl Manager {
                             s.error = None;
                         }
                         if state == "stopped" {
+                            terminal = Some(s.clone());
                             break;
                         }
                         if exited && !group_alive(runner_pid) && state == "starting" {
@@ -589,9 +683,11 @@ impl Manager {
                             s.error = Some(
                                 "Compose exited before the expected containers started.".into(),
                             );
+                            terminal = Some(s.clone());
                             break;
                         }
                         if state == "failed" {
+                            terminal = Some(s.clone());
                             break;
                         }
                     }
@@ -625,14 +721,43 @@ impl Manager {
             "system",
             "Compose observer finished. Containers and volumes were preserved.",
         );
+        terminal
     }
     pub async fn stop(&self, project: &str, service: &str) -> Result<Snapshot> {
+        self.stop_inner(project, service, None).await
+    }
+    pub(crate) async fn stop_confirmed(
+        &self,
+        project: &str,
+        service: &str,
+        run_id: &str,
+        pid: u32,
+    ) -> Result<Snapshot> {
+        self.stop_inner(project, service, Some((run_id, pid))).await
+    }
+    async fn stop_inner(
+        &self,
+        project: &str,
+        service: &str,
+        expected: Option<(&str, u32)>,
+    ) -> Result<Snapshot> {
         let mut store = self.store.lock().await;
         let p = store
             .projects
             .get_mut(project)
             .ok_or_else(|| AppError::new("PROJECT_NOT_AUTHORIZED", "Project is not open."))?;
-        let Some(current) = p.runtime.get_mut(service) else {
+        let current = p.runtime.get_mut(service);
+        if let Some((run_id, pid)) = expected {
+            if !current.as_ref().is_some_and(|s| {
+                s.run_id.as_deref() == Some(run_id) && s.pid == Some(pid) && s.active()
+            }) {
+                return Err(AppError::new(
+                    "PROCESS_CHANGED",
+                    "The managed run changed. Refresh and confirm its current process again.",
+                ));
+            }
+        }
+        let Some(current) = current else {
             return Ok(Snapshot::default());
         };
         if !current.active() {
@@ -773,9 +898,16 @@ impl Manager {
                 .and_then(|p| p.runtime.get_mut(&service))
             {
                 if current.run_id.as_deref() == Some(&run)
-                    && matches!(current.state.as_str(), "running" | "ready")
+                    && matches!(current.state.as_str(), "starting" | "running" | "ready")
                 {
-                    current.state = if healthy { "ready" } else { "running" }.into();
+                    current.state = if healthy {
+                        "ready"
+                    } else if started.elapsed() < Duration::from_secs(30) {
+                        "starting"
+                    } else {
+                        "running"
+                    }
+                    .into();
                     current.health = if healthy { "healthy" } else { "unhealthy" }.into();
                     if healthy {
                         current.error = None;
@@ -897,6 +1029,9 @@ mod tests {
             },
             env_file: None,
             health_check: None,
+            ports: vec![],
+            url: None,
+            depends_on: vec![],
         };
         manager
             .save(&project.id, definition, "absent", false)

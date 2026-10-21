@@ -12,6 +12,28 @@ use std::sync::{
 };
 use tauri::{Emitter, Manager as _, State};
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
+use tauri_plugin_liquid_glass::{GlassMaterialVariant, LiquidGlassConfig, LiquidGlassExt};
+
+pub fn apply_window_glass(window: &tauri::WebviewWindow) {
+    if let Err(error) = window.liquid_glass().set_effect(
+        window,
+        LiquidGlassConfig {
+            corner_radius: 16.0,
+            variant: GlassMaterialVariant::Clear,
+            ..Default::default()
+        },
+    ) {
+        eprintln!("Liquid Glass unavailable: {error}");
+        if let Err(error) = window.set_effects(
+            tauri::window::EffectsBuilder::new()
+                .effect(tauri::window::Effect::UnderWindowBackground)
+                .radius(16.0)
+                .build(),
+        ) {
+            eprintln!("Window blur fallback unavailable: {error}");
+        }
+    }
+}
 
 pub struct DesktopState {
     pub manager: Manager,
@@ -156,6 +178,97 @@ async fn clear_logs(
     Ok(())
 }
 #[tauri::command]
+async fn inspect_ports(
+    state: State<'_, DesktopState>,
+    project_id: String,
+    service_id: String,
+) -> Result<Vec<crate::ports::PortListener>> {
+    state.manager.inspect_ports(&project_id, &service_id).await
+}
+#[tauri::command]
+async fn kill_port(
+    state: State<'_, DesktopState>,
+    project_id: String,
+    service_id: String,
+    port: u16,
+    pid: u32,
+    identity: String,
+) -> Result<()> {
+    state
+        .manager
+        .kill_port(&project_id, &service_id, port, pid, &identity)
+        .await
+}
+#[tauri::command]
+async fn run_history(
+    state: State<'_, DesktopState>,
+    project_id: String,
+    service_id: String,
+) -> Result<Vec<crate::history::RunSummary>> {
+    state.manager.run_history(&project_id, &service_id).await
+}
+#[tauri::command]
+async fn run_details(
+    state: State<'_, DesktopState>,
+    project_id: String,
+    service_id: String,
+    run_id: String,
+) -> Result<crate::history::RunRecord> {
+    state
+        .manager
+        .run_details(&project_id, &service_id, &run_id)
+        .await
+}
+#[tauri::command]
+async fn diagnose_service(
+    state: State<'_, DesktopState>,
+    project_id: String,
+    service_id: String,
+) -> Result<Value> {
+    state.manager.diagnose(&project_id, &service_id).await
+}
+#[tauri::command]
+async fn open_service_url(
+    state: State<'_, DesktopState>,
+    project_id: String,
+    service_id: String,
+) -> Result<()> {
+    let url = state.manager.checked_url(&project_id, &service_id).await?;
+    let status = tokio::process::Command::new("/usr/bin/open")
+        .arg(url)
+        .status()
+        .await?;
+    if !status.success() {
+        return Err(AppError::new(
+            "OPEN_URL_FAILED",
+            "The browser could not open the service URL.",
+        ));
+    }
+    Ok(())
+}
+#[tauri::command]
+async fn control_sequence(
+    state: State<'_, DesktopState>,
+    targets: Vec<ServiceRef>,
+    action: String,
+) -> Result<()> {
+    if state.exiting.load(Ordering::SeqCst) {
+        return Err(AppError::new(
+            "OPERATION_IN_PROGRESS",
+            "The application is shutting down.",
+        ));
+    }
+    state
+        .manager
+        .control_sequence(targets, &action, "Desktop group")
+        .await
+}
+#[tauri::command]
+async fn cancel_sequence(state: State<'_, DesktopState>) -> Result<()> {
+    state.manager.cancel_sequence();
+    Ok(())
+}
+#[tauri::command]
 async fn remove_service(
     state: State<'_, DesktopState>,
     project_id: String,
@@ -225,7 +338,11 @@ pub fn run() {
             }
         }))
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_liquid_glass::init())
         .setup(|app| {
+            if let Some(window) = app.get_webview_window("main") {
+                apply_window_glass(&window);
+            }
             let dir = std::env::var_os("SERVICE_MANAGER_DATA_DIR")
                 .map(std::path::PathBuf::from)
                 .unwrap_or(app.path().app_data_dir()?);
@@ -305,6 +422,7 @@ pub fn run() {
             set_ai,
             create_client,
             revoke_client
+            ,inspect_ports,kill_port,run_history,run_details,diagnose_service,open_service_url,control_sequence,cancel_sequence
         ])
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {

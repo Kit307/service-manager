@@ -17,6 +17,9 @@ async fn main() {
         },
         env_file: None,
         health_check: None,
+        ports: vec![],
+        url: None,
+        depends_on: vec![],
     };
     let saved = manager
         .save(&project.id, definition, "absent", false)

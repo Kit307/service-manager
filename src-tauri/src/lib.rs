@@ -1,9 +1,12 @@
 pub mod compose;
 #[cfg(feature = "desktop")]
 pub mod desktop;
+pub mod history;
 pub mod logs;
 pub mod manager;
 pub mod mcp;
 pub mod model;
+pub mod operations;
+pub mod ports;
 pub mod project;
 pub mod proxy;

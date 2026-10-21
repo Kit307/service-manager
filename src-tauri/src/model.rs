@@ -54,6 +54,12 @@ pub struct ServiceDefinition {
     pub env_file: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub health_check: Option<HealthCheck>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub ports: Vec<u16>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub depends_on: Vec<crate::project::ServiceRef>,
 }
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -67,6 +73,11 @@ struct ServiceWire {
     file: Option<String>,
     env_file: Option<String>,
     health_check: Option<HealthCheck>,
+    #[serde(default)]
+    ports: Vec<u16>,
+    url: Option<String>,
+    #[serde(default)]
+    depends_on: Vec<crate::project::ServiceRef>,
 }
 impl TryFrom<ServiceWire> for ServiceDefinition {
     type Error = String;
@@ -83,6 +94,9 @@ impl TryFrom<ServiceWire> for ServiceDefinition {
             kind,
             env_file: w.env_file,
             health_check: w.health_check,
+            ports: w.ports,
+            url: w.url,
+            depends_on: w.depends_on,
         })
     }
 }
@@ -184,8 +198,35 @@ pub fn validate(root: &Path, config: &ProjectConfig) -> Result<()> {
                 ));
             }
         }
-        if let Some(health) = &service.health_check {
-            let url = reqwest::Url::parse(&health.url).map_err(|_| {
+        if service.ports.len() > 16
+            || service.ports.contains(&0)
+            || service
+                .ports
+                .iter()
+                .collect::<std::collections::HashSet<_>>()
+                .len()
+                != service.ports.len()
+            || service.depends_on.len() > 32
+            || service.depends_on.iter().any(|d| {
+                d.project_id.is_empty()
+                    || d.service_id.is_empty()
+                    || d.project_id.len() > 128
+                    || d.service_id.len() > 80
+            })
+        {
+            return Err(AppError::new(
+                "CONFIG_INVALID",
+                "Use up to 16 distinct TCP ports (1–65535) and 32 valid dependencies.",
+            ));
+        }
+        for address in service
+            .health_check
+            .as_ref()
+            .map(|h| h.url.as_str())
+            .into_iter()
+            .chain(service.url.as_deref())
+        {
+            let url = reqwest::Url::parse(address).map_err(|_| {
                 AppError::new("CONFIG_INVALID", "Enter a valid loopback health-check URL.")
             })?;
             if !matches!(url.scheme(), "http" | "https")
@@ -217,6 +258,8 @@ pub struct Snapshot {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
     pub activity: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub started_at: Option<String>,
 }
 impl Default for Snapshot {
     fn default() -> Self {
@@ -228,6 +271,7 @@ impl Default for Snapshot {
             health: "notConfigured".into(),
             error: None,
             activity: "Ready when you are".into(),
+            started_at: None,
         }
     }
 }
