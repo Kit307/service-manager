@@ -1,0 +1,116 @@
+.workspace-overview .overview-content {
+  width: 100%;
+  max-width: 1200px;
+  margin-inline: auto;
+}
+
+.workspace-overview .overview-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 16px 28px;
+  margin-bottom: 24px;
+}
+
+.workspace-overview .welcome-kicker { margin: 0 0 8px; }
+.workspace-overview h1 {
+  margin: 0;
+  font-size: 27px;
+  letter-spacing: -0.7px;
+  overflow-wrap: anywhere;
+}
+
+.overview-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 16px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.overview-summary > span { display: inline-flex; align-items: center; gap: 5px; }
+.overview-summary strong { color: var(--ink); font-weight: 600; }
+.overview-summary .overview-failed,
+.overview-summary .overview-failed strong { color: var(--red); }
+
+.overview-controls { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.workspace-overview .group-actions { margin: 0; gap: 8px; }
+.overview-controls .overview-add { margin-left: auto; }
+.workspace-overview .overview-note { max-width: 700px; margin: 12px 0 0; }
+
+.workspace-overview .group-service-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr));
+  gap: 16px;
+  margin-top: 24px;
+  align-items: start;
+}
+
+.workspace-overview .group-service-card {
+  min-width: 0;
+  padding: 18px;
+  border-radius: 20px;
+}
+
+.overview-service-heading { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.overview-service-icon { display: flex; color: var(--muted); flex-shrink: 0; }
+.overview-service-heading h2 {
+  margin: 0;
+  min-width: 0;
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.overview-service-heading .state-pill {
+  margin-left: auto;
+  border-radius: 999px;
+  padding: 4px 7px;
+  flex-shrink: 0;
+}
+
+.overview-service-details { margin: 18px 0; min-width: 0; }
+.workspace-overview .group-service-card code,
+.workspace-overview .group-service-card .working-path {
+  display: block;
+  margin: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.7;
+}
+.workspace-overview .group-service-card code { font-size: 12px; }
+.workspace-overview .group-service-card .working-path { font-size: 11px; }
+
+.workspace-overview .group-service-card .runtime-error {
+  margin: 0 0 14px;
+  padding: 9px 11px;
+  border: 1px solid color-mix(in srgb, var(--red) 24%, transparent);
+  background: color-mix(in srgb, var(--red-bg) 65%, transparent);
+  border-radius: 10px;
+  overflow-wrap: anywhere;
+}
+.workspace-overview .group-service-card .overview-note { margin: 0 0 14px; }
+.overview-service-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-top: 12px;
+  border-top: 1px solid color-mix(in srgb, var(--line) 65%, transparent);
+  color: var(--muted);
+  font-size: 10px;
+}
+.overview-service-footer .tiny { display: inline-flex; align-items: center; gap: 5px; padding: 6px 9px; }
+.overview-service-footer .tiny:focus-visible { outline: 2px solid var(--selected-ink); outline-offset: 3px; }
+.group-service-list > .empty-inline { grid-column: 1 / -1; }
+
+@media (max-width: 1100px) {
+  .workspace-overview.workspace-overview { padding: 24px; }
+}
+
+@media (forced-colors: active) {
+  .workspace-overview .group-service-card .runtime-error { border-color: Mark; }
+}

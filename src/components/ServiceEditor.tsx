@@ -1,5 +1,7 @@
 import { useState } from "react";
 import type { ServiceDefinition } from "../lib/types";
+import type { ServiceEntry } from "../lib/workspace";
+import "../styles/operations.css";
 import { Icon } from "./Icon";
 
 export function ServiceEditor({
@@ -8,8 +10,12 @@ export function ServiceEditor({
   onSave,
   onCancel,
   onRemove,
+  services,
+  projectId,
 }: {
   service?: ServiceDefinition;
+  services?: ServiceEntry[];
+  projectId?: string;
   saving: boolean;
   onSave: (service: ServiceDefinition) => void;
   onCancel: () => void;
@@ -27,15 +33,44 @@ export function ServiceEditor({
   );
   const [envFile, setEnvFile] = useState(service?.envFile ?? "");
   const [health, setHealth] = useState(service?.healthCheck?.url ?? "");
+  const [ports, setPorts] = useState(service?.ports?.join(", ") ?? "");
+  const [url, setUrl] = useState(service?.url ?? "");
+  const [dependsOn, setDependsOn] = useState(service?.dependsOn ?? []);
+  const [portsError, setPortsError] = useState("");
+  const [urlError, setUrlError] = useState("");
   return (
     <form
       className="service-form"
       onSubmit={(event) => {
         event.preventDefault();
+        const parts = ports.trim() ? ports.split(",").map((part) => part.trim()) : [];
+        const parsedPorts = parts.map(Number);
+        const invalidPorts =
+          parts.some((part) => !/^\d+$/.test(part)) ||
+          parsedPorts.some((port) => !Number.isInteger(port) || port < 1 || port > 65535) ||
+          new Set(parsedPorts).size !== parsedPorts.length;
+        setPortsError(invalidPorts ? "Enter unique TCP ports from 1 to 65535, separated by commas." : "");
+        let invalidUrl = false;
+        if (url.trim()) {
+          try {
+            const parsed = new URL(url.trim());
+            invalidUrl =
+              !["http:", "https:"].includes(parsed.protocol) ||
+              !["localhost", "127.0.0.1", "[::1]"].includes(parsed.hostname) ||
+              !!parsed.username || !!parsed.password;
+          } catch {
+            invalidUrl = true;
+          }
+        }
+        setUrlError(invalidUrl ? "Use a loopback HTTP/HTTPS URL without credentials." : "");
+        if (invalidPorts || invalidUrl) return;
         const common = {
           id,
           name: name.trim(),
           cwd: cwd.trim() || ".",
+          ...(parsedPorts.length ? { ports: parsedPorts } : {}),
+          ...(url.trim() ? { url: url.trim() } : {}),
+          ...(dependsOn.length ? { dependsOn } : {}),
           ...(envFile.trim() ? { envFile: envFile.trim() } : {}),
           ...(health.trim() ? { healthCheck: { url: health.trim() } } : {}),
         };
@@ -174,6 +209,52 @@ export function ServiceEditor({
           <small>Loopback HTTP/HTTPS endpoint.</small>
         </label>
       </div>
+      <div className="form-row">
+        <label>
+          Ports <span className="optional">optional</span>
+          <input
+            className="mono"
+            value={ports}
+            placeholder="3000, 8080"
+            aria-invalid={!!portsError}
+            aria-describedby={portsError ? "ports-error" : undefined}
+            onChange={(event) => { setPorts(event.target.value); setPortsError(""); }}
+          />
+          <small>Comma-separated TCP ports used for listener diagnostics.</small>
+          {portsError && <small id="ports-error" className="field-error" role="alert">{portsError}</small>}
+        </label>
+        <label>
+          Open URL <span className="optional">optional</span>
+          <input
+            className="mono"
+            value={url}
+            placeholder="http://127.0.0.1:3000"
+            aria-invalid={!!urlError}
+            aria-describedby={urlError ? "open-url-error" : undefined}
+            onChange={(event) => { setUrl(event.target.value); setUrlError(""); }}
+          />
+          <small>Loopback HTTP/HTTPS page to open. Separate from the health check.</small>
+          {urlError && <small id="open-url-error" className="field-error" role="alert">{urlError}</small>}
+        </label>
+      </div>
+      {services && (
+        <fieldset className="dependency-options">
+          <legend>Dependencies</legend>
+          <small>Dependencies wait until Ready and require a configured health check.</small>
+          {services.filter((entry) => entry.project.id !== projectId || entry.service.id !== id).map((entry) => {
+            const ref = { projectId: entry.project.id, serviceId: entry.service.id };
+            const checked = dependsOn.some((dependency) => dependency.projectId === ref.projectId && dependency.serviceId === ref.serviceId);
+            return (
+              <label key={JSON.stringify(ref)}>
+                <input type="checkbox" checked={checked} onChange={(event) => setDependsOn((old) =>
+                  event.target.checked ? [...old, ref] : old.filter((dependency) => dependency.projectId !== ref.projectId || dependency.serviceId !== ref.serviceId),
+                )} />
+                {entry.service.name} · {entry.project.name}{!entry.service.healthCheck && " (health check required)"}
+              </label>
+            );
+          })}
+        </fieldset>
+      )}
       <div className="form-footer">
         <div>
           {onRemove && (

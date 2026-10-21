@@ -1,0 +1,24 @@
+.operations-panel { flex: 1; padding: 24px; overflow: auto; min-height: 0; display: grid; align-content: start; gap: 20px; }
+.operations-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.operations-heading h2 { margin: 0; font-size: 16px; }
+.operations-panel h3 { font-size: 14px; margin: 0 0 12px; }
+.operations-panel p { line-height: 1.6; }
+.operations-error, .field-error { color: var(--red); }
+.run-list { display: grid; gap: 8px; }
+.run-list > button { display: grid; text-align: left; gap: 6px; padding: 12px; overflow-wrap: anywhere; }
+.run-list > button[aria-pressed="true"] { border-color: var(--primary); }
+.run-list code { white-space: pre-wrap; }
+.run-metadata { display: grid; grid-template-columns: 90px minmax(0, 1fr); gap: 8px 16px; font-size: 12px; }
+.run-metadata dd { margin: 0; overflow-wrap: anywhere; }
+.historical-output { max-height: 400px; overflow: auto; background: var(--log-bg); padding: 12px; border-radius: 8px; font-size: 12px; }
+.historical-output pre { white-space: pre-wrap; overflow-wrap: anywhere; margin: 0 0 6px; }
+.port-listener, .failure-alert { display: flex; align-items: center; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--line); }
+.port-listener > div, .failure-alert > div { flex: 1; min-width: 0; display: grid; gap: 6px; }
+.port-listener span, .failure-alert p { font-size: 12px; margin: 0; overflow-wrap: anywhere; }
+.context-label { display: grid; gap: 8px; margin: 12px 0; }
+.context-label textarea { color: var(--ink); background: var(--log-bg); border: 1px solid var(--line); border-radius: 8px; padding: 12px; resize: vertical; width: 100%; box-sizing: border-box; font-family: monospace; font-size: 12px; }
+.failure-alerts { background: var(--surface); max-height: 240px; overflow: auto; padding: 12px 20px; border-bottom: 1px solid var(--line); }
+.dependency-options { display: grid; gap: 8px; }
+.dependency-options label { display: flex; flex-direction: row; align-items: center; gap: 8px; }
+.dependency-options input { width: auto; }
+@media (max-width: 600px) { .operations-panel { padding: 16px; } .port-listener, .failure-alert { flex-wrap: wrap; } }

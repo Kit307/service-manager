@@ -9,6 +9,7 @@ import type {
   Workspace,
   WorkspaceGroup,
   ServiceRef,
+  PortListener, RunSummary, RunRecord, Diagnostics,
 } from "./types";
 
 export const isDesktop = () => "__TAURI_INTERNALS__" in window;
@@ -36,6 +37,14 @@ export async function pickProjectFolder(title = "Open a code folder") {
   });
 }
 export const api = {
+  inspectPorts: (projectId: string, serviceId: string): Promise<PortListener[]> => invoke("inspect_ports", {projectId, serviceId}),
+  killPort: (projectId: string, serviceId: string, listener: {port:number;pid:number;identity:string}): Promise<void> => invoke("kill_port", {projectId, serviceId, ...listener}),
+  runHistory: (projectId:string, serviceId:string):Promise<RunSummary[]> => invoke("run_history", {projectId,serviceId}),
+  runDetails: (projectId:string, serviceId:string, runId:string):Promise<RunRecord> => invoke("run_details", {projectId,serviceId,runId}),
+  diagnose: (projectId:string, serviceId:string):Promise<Diagnostics> => invoke("diagnose_service", {projectId,serviceId}),
+  openUrl: (projectId:string, serviceId:string):Promise<void> => invoke("open_service_url", {projectId,serviceId}),
+  controlSequence: (targets:ServiceRef[], action:"start"|"stop"|"restart"):Promise<void> => invoke("control_sequence", {targets,action}),
+  cancelSequence: ():Promise<void> => invoke("cancel_sequence"),
   onWorkspace: (callback: (workspace: Workspace) => void) =>
     listen<Workspace>("workspace-changed", (event) => callback(event.payload)),
   onLogs: (callback: () => void) => listen("logs-changed", callback),

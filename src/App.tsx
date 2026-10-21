@@ -17,7 +17,10 @@ import {
 } from "./lib/types";
 import { Icon } from "./components/Icon";
 import { ServiceEditor } from "./components/ServiceEditor";
+import { ServiceOperations } from "./components/ServiceOperations";
+import { FailureAlerts } from "./components/FailureAlerts";
 import { LogPanel } from "./components/LogPanel";
+import { LogWorkspace } from "./components/LogWorkspace";
 import { AiConnections } from "./components/AiConnections";
 
 import { ServiceSidebar } from "./components/ServiceSidebar";
@@ -49,11 +52,15 @@ export default function App() {
   const [projectId, setProjectId] = useState("");
   const [serviceId, setServiceId] = useState("");
   const [view, setView] = useState<
-    "workspace" | "group-settings" | "service" | "new" | "settings" | "ai"
+    "workspace" | "group-settings" | "service" | "new" | "settings" | "ai" | "history" | "diagnostics" | "logs"
   >("workspace");
+  const [logRequest, setLogRequest] = useState<{ ref: ServiceRef; id: number }>();
+  const [focusedLog, setFocusedLog] = useState<ServiceRef>();
   const [groupId, setGroupId] = useState("");
   const [results, setResults] = useState<ActionResult[]>([]);
   const [busy, setBusy] = useState(false);
+  const [sequenceRunning, setSequenceRunning] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
   const [draft, setDraft] = useState<{
     projectId: string;
     serviceId: string;
@@ -66,6 +73,15 @@ export default function App() {
   const [theme, setTheme] = useState(
     () => window.localStorage.getItem("appearance") || "system",
   );
+  const [backgroundOpacity, setBackgroundOpacity] = useState(() => {
+    try {
+      const stored = window.localStorage.getItem("glass-background-opacity");
+      const value = stored?.trim() ? Number(stored) : NaN;
+      return Number.isFinite(value) ? Math.min(100, Math.max(30, value)) : 55;
+    } catch {
+      return 55;
+    }
+  });
   const allServices = entries(workspace.projects);
   const group = workspace.groups.find((g) => g.id === groupId);
   const members = new Set(group?.services.map(refKey));
@@ -91,6 +107,7 @@ export default function App() {
     setWorkspace(data);
     return data;
   }, []);
+  const observeSelectedLogs = view !== "logs";
   useEffect(() => {
     let live = true;
     const update = async () => {
@@ -121,6 +138,18 @@ export default function App() {
     window.localStorage.setItem("appearance", theme);
   }, [theme]);
   useEffect(() => {
+    document.documentElement.style.setProperty(
+      "--background-opacity",
+      `${backgroundOpacity}%`,
+    );
+    try {
+      window.localStorage.setItem("glass-background-opacity", String(backgroundOpacity));
+    } catch {
+      // Storage can be unavailable; the control still works for this session.
+    }
+  }, [backgroundOpacity]);
+  useEffect(() => {
+    if (!observeSelectedLogs) return;
     let live = true;
     let cursor: string | undefined;
     let inFlight = false;
@@ -138,7 +167,7 @@ export default function App() {
         const page = await api.logs(projectId, serviceId, cursor);
         if (live) {
           cursor = page.nextCursor;
-          pending = page.records.length > 0;
+          pending = pending || page.records.length > 0;
           setGap((old) => old || page.truncated);
           setLogs((old) => {
             const combined = [
@@ -184,7 +213,16 @@ export default function App() {
       clearTimeout(retry);
       void subscription.then((unsubscribe) => unsubscribe());
     };
-  }, [projectId, serviceId]);
+  }, [projectId, serviceId, observeSelectedLogs]);
+
+  function openLogs(ref?: ServiceRef) {
+    if (ref) {
+      setLogRequest((previous) => ({ ref, id: (previous?.id ?? 0) + 1 }));
+      setFocusedLog(ref);
+    }
+    setView("logs");
+    setError("");
+  }
 
   function select(p: Project, id?: string) {
     const next = id ?? p.config.services[0]?.id ?? "";
@@ -292,19 +330,16 @@ export default function App() {
     await perform(async () => {
       setResults([]);
       if (!(await review(targets, action))) return;
-      const settled = await Promise.allSettled(
-        targets.map(({ project: p, service: s }) =>
-          api.control(p.id, s.id, action),
-        ),
-      );
-      setResults(
-        settled.map((result, i) => ({
-          key: refKey(serviceRef(targets[i])),
-          ...(result.status === "rejected"
-            ? { error: errorMessage(result.reason) }
-            : {}),
-        })),
-      );
+      setSequenceRunning(true);
+      setCancelling(false);
+      try {
+        const selected = action === "start" ? visibleServices : targets;
+        await api.controlSequence(selected.map(serviceRef), action);
+        setResults(targets.map((entry) => ({ key: refKey(serviceRef(entry)) })));
+      } finally {
+        setSequenceRunning(false);
+        setCancelling(false);
+      }
     });
   }
   async function moveService(ref: ServiceRef, target?: string) {
@@ -402,7 +437,7 @@ export default function App() {
             <Icon name="terminal" size={18} />
           </span>
           <span>Service Manager</span>
-          <span className="version">0.5</span>
+          <span className="version">0.6</span>
         </div>
         <button
           className="open-folder"
@@ -418,7 +453,9 @@ export default function App() {
           services={allServices}
           groups={workspace.groups}
           selected={
-            view === "service" || view === "settings"
+            view === "logs" && focusedLog
+              ? refKey(focusedLog)
+              : view === "service" || view === "settings"
               ? refKey({ projectId, serviceId })
               : ""
           }
@@ -437,6 +474,13 @@ export default function App() {
         />
         <div className="sidebar-bottom">
           <button
+            className={`ai-nav ${view === "logs" ? "selected" : ""}`}
+            onClick={() => openLogs()}
+          >
+            <Icon name="terminal" />
+            Log workspace
+          </button>
+          <button
             className={`ai-nav ${view === "ai" ? "selected" : ""}`}
             onClick={() => setView("ai")}
           >
@@ -446,6 +490,19 @@ export default function App() {
               className={`connection-dot ${workspace.ai.enabled ? "connected" : ""}`}
             />
           </button>
+          <label className="background-opacity">
+            <span>Background opacity <output>{backgroundOpacity}%</output></span>
+            <input
+              type="range"
+              min="30"
+              max="100"
+              step="5"
+              value={backgroundOpacity}
+              aria-label="Background opacity"
+              aria-valuetext={`${backgroundOpacity}%`}
+              onChange={(event) => setBackgroundOpacity(Number(event.target.value))}
+            />
+          </label>
           <div className="sidebar-footer">
             <span>
               <span
@@ -482,14 +539,26 @@ export default function App() {
         </div>
       </aside>
       <main className="workspace">
+        <FailureAlerts projects={workspace.projects} onService={(ref) => {
+          const target = workspace.projects.find((p) => p.id === ref.projectId);
+          if (target) select(target, ref.serviceId);
+        }} />
+        {sequenceRunning && <div className="sequence-progress" role="status">
+          Applying dependency order. Services already started remain running after cancellation.
+          <button className="secondary" disabled={cancelling} onClick={() => {
+            setCancelling(true);
+            void api.cancelSequence().catch((cause) => {setError(errorMessage(cause));setCancelling(false);});
+          }}>{cancelling ? "Cancelling…" : "Cancel sequence"}</button>
+        </div>}
+
         <header className="workspace-bar">
           <div className="breadcrumb">
             <Icon
-              name={view === "ai" ? "ai" : group ? "group" : "grid"}
+              name={view === "logs" ? "terminal" : view === "ai" ? "ai" : group ? "group" : "grid"}
               size={14}
             />
             <span>
-              {view === "ai"
+              {view === "logs" ? "Log workspace" : view === "ai"
                 ? "AI Connections"
                 : (group?.name ?? "All services")}
             </span>
@@ -523,7 +592,14 @@ export default function App() {
             processes before running services again.
           </div>
         )}
-        {view === "ai" ? (
+        <LogWorkspace
+          services={allServices}
+          requested={logRequest?.ref}
+          requestId={logRequest?.id}
+          visible={view === "logs"}
+          onSelect={setFocusedLog}
+        />
+        {view === "logs" ? null : view === "ai" ? (
           <AiConnections
             workspace={workspace}
             onRefresh={refresh}
@@ -553,7 +629,7 @@ export default function App() {
             onControl={(action) => {
               void bulk(action);
             }}
-            onService={({ project: p, service: s }) => select(p, s.id)}
+            onService={(entry) => openLogs(serviceRef(entry))}
             onAdd={() => {
               void addService();
             }}
@@ -564,6 +640,8 @@ export default function App() {
             <ServiceEditor
               key={`new-${project.id}`}
               saving={busy}
+              services={allServices}
+              projectId={project.id}
               onSave={(d) => {
                 void save(d);
               }}
@@ -604,6 +682,7 @@ export default function App() {
                   </div>
                 </div>
                 <div className="button-row">
+                  {service.url && <button className="secondary" disabled={busy || !active || snapshot.state === "stopping"} onClick={() => { void perform(() => api.openUrl(project.id, service.id)); }}>Open URL</button>}
                   <button
                     className="secondary"
                     disabled={busy || !active || snapshot.state === "stopping"}
@@ -692,13 +771,17 @@ export default function App() {
                 <Icon name="settings" size={14} />
                 Settings
               </button>
+              {(["history", "diagnostics"] as const).map((tab) => <button key={tab} className={view === tab ? "selected" : ""} aria-pressed={view === tab} onClick={() => setView(tab)}>{tab === "history" ? "History" : "Diagnostics"}</button>)}
+              <button className="secondary" onClick={() => openLogs({ projectId: project.id, serviceId: service.id })}>
+                Open in log workspace
+              </button>
               <span>
                 {service.healthCheck
                   ? `Health check · ${snapshot.health}`
                   : "No health check configured"}
               </span>
             </div>
-            <div className="service-pane" hidden={view === "settings"}>
+            <div className="service-pane" hidden={view !== "service"}>
               <LogPanel
                 key={`${project.id}/${service.id}`}
                 logs={logs}
@@ -712,6 +795,9 @@ export default function App() {
                 }}
               />
             </div>
+            {(view === "history" || view === "diagnostics") && <ServiceOperations projectId={project.id} serviceId={service.id} mode={view} onService={(ref) => {
+              const target=workspace.projects.find((p) => p.id === ref.projectId); if(target) select(target,ref.serviceId);
+            }} />}
             {draft?.projectId === project.id &&
               draft.serviceId === service.id && (
                 <section
@@ -724,6 +810,8 @@ export default function App() {
                     key={`${draft.projectId}/${draft.serviceId}/${draft.revision}`}
                     service={draft.definition}
                     saving={busy}
+                    services={allServices}
+                    projectId={project.id}
                     onSave={(d) => {
                       void save(d);
                     }}

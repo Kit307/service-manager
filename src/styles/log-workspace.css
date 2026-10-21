@@ -1,0 +1,53 @@
+.log-workspace { display: flex; flex-direction: column; min-height: 0; height: 100%; gap: 16px; }
+.log-workspace[hidden] { display: none; }
+.log-workspace-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 5px 2px 0; }
+.log-workspace-heading { display: flex; align-items: baseline; flex-wrap: wrap; gap: 12px; }
+.log-workspace-heading h1 { margin: 0; color: var(--ink); font-size: 21px; font-weight: 650; letter-spacing: -.65px; line-height: 1.4; }
+.log-workspace-heading > span { color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+.log-count-divider { margin: 0 7px; opacity: .5; }
+.log-workspace-actions { display: flex; align-items: center; gap: 8px; }
+.log-workspace-actions button, .log-move-select { min-height: 30px; }
+.log-workspace .log-add-pane { display: inline-flex; align-items: center; gap: 7px; padding: 6px 11px; border: 1px solid var(--control-edge); border-radius: 10px; background: var(--control-glass); box-shadow: var(--control-depth); font-size: 12px; font-weight: 550; }
+.log-arrange-controls { display: flex; align-items: center; gap: 1px; margin-right: 2px; }
+.log-workspace .log-arrange-icon { display: inline-flex; align-items: center; justify-content: center; width: 26px; padding: 5px; border: 0; border-radius: 7px; background: transparent; box-shadow: none; color: var(--muted); }
+.log-workspace .log-arrange-icon:hover { color: var(--ink); background: var(--hover); }
+.log-move-select, .log-add-select { position: relative; display: inline-flex; flex-direction: row; align-items: center; justify-content: center; flex-shrink: 0; gap: 6px; margin: 0; white-space: nowrap; cursor: pointer; }
+.log-move-select { padding: 5px 8px; color: var(--muted); font-size: 12px; border-right: 1px solid var(--line); padding-right: 13px; }
+.log-move-select:hover, .log-add-select:hover { color: var(--ink); }
+.log-move-select select, .log-add-select select { position: absolute; inset: 0; width: 100%; height: 100%; min-width: 0; margin: 0; padding: 0; opacity: 0; cursor: pointer; }
+.log-move-select:focus-within, .log-add-select:focus-within { outline: 2px solid var(--primary); outline-offset: 2px; border-radius: 7px; }
+.log-workspace-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 440px), 1fr)); grid-auto-rows: minmax(300px, 1fr); align-content: stretch; gap: 14px; overflow: auto; min-height: 0; flex: 1; padding: 2px; }
+.log-workspace-pane { display: flex; flex-direction: column; min-width: 0; min-height: 300px; border: 1px solid var(--line); border-radius: 13px; overflow: hidden; background: var(--log-bg); box-shadow: 0 3px 14px #00000006; }
+.log-workspace-pane-header { display: flex; align-items: center; flex-shrink: 0; min-width: 0; padding: 0 8px 0 4px; gap: 7px; min-height: 40px; border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--surface) 80%, transparent); box-shadow: inset 0 1px 0 var(--glass-highlight); }
+.log-workspace-tabs { display: flex; align-items: stretch; align-self: stretch; overflow-x: auto; flex: 1 1 auto; min-width: 0; gap: 1px; scrollbar-width: none; }
+.log-workspace-tabs::-webkit-scrollbar { display: none; }
+.log-workspace-tab { position: relative; display: flex; align-items: center; flex-shrink: 0; border-bottom: 2px solid transparent; padding: 0 2px; }
+.log-workspace-tab.selected { border-bottom-color: var(--ink); background: linear-gradient(0deg, color-mix(in srgb, var(--selected) 65%, transparent), transparent); }
+.log-workspace-tab > [role=tab] { display: flex; align-items: center; gap: 7px; border: 0; border-radius: 0; box-shadow: none; background: none; padding: 10px 4px 8px 9px; white-space: nowrap; touch-action: none; color: var(--muted); font-size: 12px; font-weight: 450; }
+.log-workspace-tab.selected > [role=tab] { color: var(--ink); font-weight: 600; }
+.log-workspace-tab > [role=tab]:hover { color: var(--ink); }
+.log-workspace-tab .status-dot { width: 6px; height: 6px; flex-shrink: 0; }
+.log-workspace-tab small { max-width: 90px; overflow: hidden; text-overflow: ellipsis; color: var(--muted); font-size: 10px; font-weight: 400; }
+.log-workspace .log-tab-close, .log-workspace .log-close-pane { display: inline-flex; align-items: center; justify-content: center; border: 0; padding: 4px; border-radius: 5px; box-shadow: none; background: none; color: var(--muted); }
+.log-workspace .log-tab-close { margin: 0 3px 0 1px; opacity: .55; }
+.log-workspace-tab:hover .log-tab-close, .log-tab-close:focus-visible { opacity: 1; }
+.log-workspace .log-tab-close:hover, .log-workspace .log-close-pane:hover { background: var(--hover); color: var(--ink); }
+.log-add-select { min-height: 26px; padding: 4px 7px; font-size: 11px; color: var(--muted); border: 1px solid var(--line); border-radius: 7px; background: color-mix(in srgb, var(--surface) 40%, transparent); box-shadow: inset 0 1px 0 var(--glass-highlight); }
+.log-close-pane { flex-shrink: 0; width: 23px; height: 25px; }
+.log-workspace-output { display: flex; flex-direction: column; min-height: 0; flex: 1; }
+.log-workspace-output .log-panel { min-height: 0; flex: 1; border: 0; border-radius: 0; box-shadow: none; }
+.log-workspace-output .log-viewport { min-height: 100px; }
+.log-workspace-output .log-line { grid-template-columns: 64px 48px minmax(0, 1fr); }
+.log-workspace-output .log-line pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+.log-workspace-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 9px; flex: 1; margin: 0; padding: 30px 18px; text-align: center; color: var(--muted); font-size: 12px; }
+.log-empty-symbol { display: grid; place-items: center; width: 47px; height: 47px; margin-bottom: 6px; border: 1px solid var(--line); border-radius: 13px; color: var(--subtle); background: color-mix(in srgb, var(--surface) 45%, transparent); box-shadow: inset 0 1px 0 var(--glass-highlight); }
+.log-workspace-empty strong { color: var(--ink); font-size: 13px; font-weight: 550; }
+.log-workspace-empty p { margin: 0; max-width: 240px; font-size: 12px; line-height: 1.5; }
+.log-workspace-new { display: none; min-height: 80px; border: 1px dashed var(--line); border-radius: 13px; align-items: center; justify-content: center; color: var(--muted); font-size: 12px; }
+.dragging-log .log-workspace-new { display: flex; }
+.dragging-log [data-log-drop-pane]:hover, .log-workspace-new.drop-target { outline: 2px solid var(--primary); outline-offset: -2px; }
+.log-feed-error { padding: 8px 12px; color: var(--red); font-size: 12px; border-bottom: 1px solid var(--line); }
+.log-feed-error button { margin-left: 6px; }
+@media (max-width: 1000px) { .log-workspace-grid { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 740px) { .log-workspace-toolbar { align-items: flex-start; } .log-workspace-actions { margin-left: auto; gap: 3px; } .log-workspace-heading { gap: 6px; } }
+@media (prefers-reduced-transparency: reduce), (prefers-contrast: more) { .log-workspace-pane, .log-workspace-pane-header, .log-workspace-tab.selected, .log-add-select, .log-empty-symbol { background: var(--surface); box-shadow: none; } }

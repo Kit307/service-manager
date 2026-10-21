@@ -43,6 +43,17 @@ const paths = {
   ),
   moon: <path d="M21 13a9 9 0 1 1-10-10 7 7 0 0 0 10 10Z" />,
   plus: <path d="M12 5v14M5 12h14" />,
+  split: (
+    <>
+      <rect x="3" y="4" width="18" height="16" rx="2" />
+      <path d="M12 4v16" />
+    </>
+  ),
+  trash: (
+    <>
+      <path d="M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7m4-7v7" />
+    </>
+  ),
   play: <path d="m8 5 11 7-11 7z" />,
   stop: <rect x="6" y="6" width="12" height="12" rx="1" />,
   restart: (

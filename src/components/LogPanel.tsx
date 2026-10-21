@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { LogRecord } from "../lib/types";
 import { Icon } from "./Icon";
+import "../styles/log-panel.css";
 
 // shortcut: supports JSON string levels and prefixed console levels; extend for demonstrated logger formats.
 function severity(text: string): "error" | "warning" | "info" | "unknown" {
@@ -40,20 +41,46 @@ function severity(text: string): "error" | "warning" | "info" | "unknown" {
   }
 }
 
+export type LogViewState = {
+  stream: "all" | "stdout" | "stderr";
+  query: string;
+  follow: boolean;
+};
+
 export function LogPanel({
   logs,
   active,
   gap,
   onClear,
+  viewState,
+  onViewStateChange,
+  label = "Service logs",
+  clearing = false,
+  clearLabel = "Clear",
+  compact = false,
 }: {
   logs: LogRecord[];
   active: boolean;
   gap: boolean;
   onClear: () => void;
+  viewState?: LogViewState;
+  onViewStateChange?: (next: LogViewState) => void;
+  label?: string;
+  clearing?: boolean;
+  clearLabel?: string;
+  compact?: boolean;
 }) {
-  const [stream, setStream] = useState("all");
-  const [query, setQuery] = useState("");
-  const [follow, setFollow] = useState(true);
+  const [localViewState, setLocalViewState] = useState<LogViewState>({
+    stream: "all",
+    query: "",
+    follow: true,
+  });
+  const { stream, query, follow } = viewState ?? localViewState;
+  function updateViewState(change: Partial<LogViewState>) {
+    const next = { stream, query, follow, ...change };
+    if (!viewState) setLocalViewState(next);
+    onViewStateChange?.(next);
+  }
   const [copied, setCopied] = useState(false);
   const viewport = useRef<HTMLDivElement>(null);
   const visible = useMemo(
@@ -69,28 +96,49 @@ export function LogPanel({
     if (follow && viewport.current)
       viewport.current.scrollTop = viewport.current.scrollHeight;
   }, [visible, follow]);
+  const search = <label className="search-input">
+    <Icon name="search" size={14} />
+    <input aria-label="Search logs" value={query}
+      onChange={(e) => updateViewState({ query: e.target.value })}
+      placeholder={compact ? "Search logs…" : "Find in output…"} />
+    {!compact && <kbd>⌕</kbd>}
+  </label>;
   return (
-    <section className="log-panel" aria-label="Service logs">
+    <section className={`log-panel${compact ? " log-panel-compact" : ""}`} aria-label={label}>
       <div className="log-toolbar">
-        <div className="log-title">
+        {compact ? <>
+          {search}
+          <label className="log-stream-picker">
+            <span>{stream === "all" ? "All streams" : stream}</span>
+            <Icon name="chevron" size={11} />
+            <select aria-label="Output stream" value={stream}
+              onChange={(event) => updateViewState({ stream: event.target.value as LogViewState["stream"] })}>
+              <option value="all">All output</option>
+              <option value="stdout">stdout</option>
+              <option value="stderr">stderr</option>
+            </select>
+          </label>
+        </> : <div className="log-title">
           <Icon name="terminal" />
           <h2>Output</h2>
           {active && <span className="live-indicator">Live</span>}
           <span className="log-count">
             {visible.length.toLocaleString()} lines
           </span>
-        </div>
+        </div>}
         <div className="button-row">
           <button
             className={follow ? "tiny active" : "tiny"}
             aria-pressed={follow}
-            onClick={() => setFollow(!follow)}
+            title={follow ? "Pause following" : "Follow output"}
+            onClick={() => updateViewState({ follow: !follow })}
           >
             <Icon name="arrow" size={13} />
-            {follow ? "Following" : "Follow"}
+            <span className="log-action-label">{follow ? "Following" : "Follow"}</span>
           </button>
           <button
             className="tiny"
+            title={copied ? "Copied" : "Copy output"}
             onClick={async () => {
               try {
                 await navigator.clipboard.writeText(
@@ -104,37 +152,29 @@ export function LogPanel({
             }}
           >
             <Icon name={copied ? "check" : "copy"} size={13} />
-            {copied ? "Copied" : "Copy"}
+            <span className="log-action-label">{copied ? "Copied" : "Copy"}</span>
           </button>
-          <button className="tiny" onClick={onClear}>
-            Clear
+          <button className="tiny" onClick={onClear} disabled={clearing} title={clearLabel}>
+            {compact && <Icon name="trash" size={13} />}
+            <span className="log-action-label">{clearLabel}</span>
           </button>
         </div>
       </div>
-      <div className="log-filters">
+      {!compact && <div className="log-filters">
         <div className="segmented" aria-label="Output stream">
-          {["all", "stdout", "stderr"].map((s) => (
+          {(["all", "stdout", "stderr"] as const).map((s) => (
             <button
               key={s}
               aria-pressed={stream === s}
               className={s === stream ? "selected" : ""}
-              onClick={() => setStream(s)}
+              onClick={() => updateViewState({ stream: s })}
             >
               {s === "all" ? "All output" : s}
             </button>
           ))}
         </div>
-        <label className="search-input">
-          <Icon name="search" size={14} />
-          <input
-            aria-label="Search logs"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Find in output…"
-          />
-          <kbd>⌕</kbd>
-        </label>
-      </div>
+        {search}
+      </div>}
       <div
         ref={viewport}
         className="log-viewport"
@@ -143,8 +183,12 @@ export function LogPanel({
         tabIndex={0}
         onScroll={() => {
           const el = viewport.current;
-          if (el && el.scrollHeight - el.scrollTop - el.clientHeight > 40)
-            setFollow(false);
+          if (
+            follow &&
+            el &&
+            el.scrollHeight - el.scrollTop - el.clientHeight > 40
+          )
+            updateViewState({ follow: false });
         }}
       >
         {gap && (
@@ -200,9 +244,9 @@ export function LogPanel({
       <div className="log-status">
         <span>
           <span className={`status-dot ${active ? "running" : "stopped"}`} />
-          {active ? "Receiving service output" : "No active stream"}
+          {compact ? active ? "Live output" : "Not running" : active ? "Receiving service output" : "No active stream"}
         </span>
-        <span>Bounded history · plain text</span>
+        <span>{compact ? `${visible.length.toLocaleString()} lines` : "Bounded history · plain text"}</span>
       </div>
     </section>
   );
