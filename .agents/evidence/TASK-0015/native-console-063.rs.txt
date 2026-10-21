@@ -1,0 +1,69 @@
+// Disposable native UI fixture. No Manager, services, credentials, or MCP server.
+use serde_json::{json, Value};
+use tauri_plugin_liquid_glass::LiquidGlassExt;
+#[tauri::command]
+fn workspace() -> Value {
+    eprintln!("glass-qa: workspace fixture requested");
+    json!({"projects":[{"id":"qa","name":"Glass preview","path":"/tmp/service-manager-glass-qa/sample","revision":"fixture","config":{"schemaVersion":1,"services":[
+        {"id":"api","name":"API server","cwd":".","type":"command","command":"pnpm dev:api","ports":[4100],"url":"http://127.0.0.1:4100","healthCheck":{"url":"http://127.0.0.1:4100/health"}},
+        {"id":"web","name":"Web app","cwd":".","type":"command","command":"pnpm dev","ports":[5173],"url":"http://127.0.0.1:5173","dependsOn":[{"projectId":"qa","serviceId":"api"}]},
+        {"id":"worker","name":"Background worker","cwd":".","type":"command","command":"pnpm worker","ports":[4200]}
+    ]},"trusted":["api","web","worker"],"runtime":{
+        "api":{"state":"ready","runId":"qa-ready","pid":32101,"startedAt":"2026-10-21T12:30:00Z","health":"healthy"},
+        "web":{"state":"stopped","health":"notConfigured"},
+        "worker":{"state":"failed","runId":"qa-failed","exitCode":1,"health":"notConfigured","error":"Port 4200 is already in use."}
+    }}],"groups":[{"id":"development","name":"Development","services":[{"projectId":"qa","serviceId":"api"},{"projectId":"qa","serviceId":"web"},{"projectId":"qa","serviceId":"worker"}]}],"ai":{"enabled":false,"endpoint":"http://127.0.0.1:47831/mcp","clients":[]},"uncleanShutdown":false})
+}
+fn records() -> Value {
+    json!([
+        {"seq":1,"runId":"qa-ready","timestamp":"2026-10-21T12:30:00Z","stream":"system","text":"Starting API server · run qa-ready","truncated":false},
+        {"seq":2,"runId":"qa-ready","timestamp":"2026-10-21T12:30:00Z","stream":"stdout","text":"HTTP server listening on http://127.0.0.1:4100","truncated":false},
+        {"seq":3,"runId":"qa-ready","timestamp":"2026-10-21T12:30:00Z","stream":"stdout","text":"Health check passed. Ready to accept requests.","truncated":false},
+        {"seq":4,"runId":"qa-ready","timestamp":"2026-10-21T12:30:00Z","stream":"stdout","text":"GET /health 200 · 2 ms","truncated":false}
+    ])
+}
+#[tauri::command]
+fn read_logs(cursor: Option<String>) -> Value {
+    json!({"records":if cursor.is_some(){json!([])}else{records()},"nextCursor":"qa-cursor","truncated":false})
+}
+#[tauri::command]
+fn run_history(service_id: String) -> Value {
+    json!([{"projectId":"qa","serviceId":service_id,"runId":"qa-previous","command":"pnpm dev:api","startedAt":"2026-10-21T12:00:00Z","endedAt":"2026-10-21T12:20:00Z","state":"stopped","exitCode":0,"truncated":false}])
+}
+#[tauri::command]
+fn run_details(service_id: String) -> Value {
+    let mut run = run_history(service_id)[0].clone();
+    let mut logs = records();
+    for record in logs.as_array_mut().unwrap() { record["runId"] = json!("qa-previous"); }
+    run["records"] = logs;
+    run
+}
+#[tauri::command]
+fn inspect_ports(service_id: String) -> Value {
+    if service_id == "worker" {json!([{"port":4200,"pid":32102,"name":"QA fixture listener","identity":"synthetic-only"}])}else{json!([])}
+}
+#[tauri::command]
+fn diagnose_service(service_id: String) -> Value {
+    let state = workspace()["projects"][0]["runtime"][&service_id].clone();
+    json!({"projectId":"qa","serviceId":service_id,"runId":"qa-ready","state":state,"summary":["Synthetic UI fixture. No real processes are running."],"records":records(),"nextCursor":"qa-cursor","truncated":false,"redacted":true})
+}
+fn main() {
+    let mut context = tauri::generate_context!();
+    context.config_mut().identifier = "dev.servicemanager.consoleqa063".into();
+    context.config_mut().product_name = Some("Service Manager Console QA".into());
+    let mut window = context.config().app.windows[0].clone();
+    window.title = "Service Manager Console QA".into();
+    context.config_mut().app.windows.clear();
+    tauri::Builder::default()
+        .plugin(tauri_plugin_liquid_glass::init())
+        .invoke_handler(tauri::generate_handler![workspace, read_logs, run_history, run_details, inspect_ports, diagnose_service])
+        .setup(move |app| {
+            let window = tauri::WebviewWindowBuilder::from_config(app, &window)?.build()?;
+            eprintln!("glass-qa: plugin native supported={}", window.liquid_glass().is_supported());
+            service_manager::desktop::apply_window_glass(&window);
+            eprintln!("glass-qa: production glass helper returned; any fallback errors are logged above");
+            Ok(())
+        })
+        .run(context)
+        .expect("native Glass fixture");
+}

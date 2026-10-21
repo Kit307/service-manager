@@ -1,0 +1,56 @@
+{
+  "version": "0.6.3",
+  "frontend": {
+    "tests": 81,
+    "files": 13,
+    "command": "pnpm test --run --maxWorkers=1",
+    "reviewRegressions": [
+      "queued event during empty read",
+      "drag target across gaps",
+      "keyboard focus in later pane",
+      "sidebar always opens full Output"
+    ]
+  },
+  "rust": {
+    "passed": 51,
+    "ignored": 1,
+    "command": "cargo test --no-default-features",
+    "note": "No Rust behavior changes since this full-suite run; later changes are frontend and release version metadata."
+  },
+  "gates": [
+    "pnpm lint",
+    "pnpm build",
+    "cargo fmt --check",
+    "cargo clippy --features desktop --all-targets -- -D warnings"
+  ],
+  "sourceSha256": {
+    "src/App.tsx": "a908fe270dd6e496473152b6a4675d36d4a4fec1b9f5989a055708a10b7c59f8",
+    "src/components/LogWorkspace.tsx": "e538556f00c3587339a2987e71863ed0ea2801c00b1618a5fb27fd1e0004e485",
+    "src/components/LogPanel.tsx": "6000979555b8aecdf425138badbdeee3a18ae10375f11bfb208e1d10295132b7",
+    "src/components/Icon.tsx": "55027c8792a8b2787c752605091dc0da399124c0987098bb05ab2dedd1a3ce2d",
+    "src/lib/useServiceLogs.ts": "3f72c8c1b026909fa50a8596db836372b22b51efd09e5333b239e2fa1800ab94",
+    "src/styles/log-workspace.css": "12bc99edb0ea7fa832b6a3bab9d1613ad8715ce531c1772bda7130123938a6c2",
+    "src/styles/log-panel.css": "a63f90fb848289066d8e663f7da0bc2d947c0fe2cf265434e87a9efe2a30e939"
+  },
+  "nativeFinalConsole": {
+    "os": "macOS 27.0.1",
+    "nativeSupported": true,
+    "managerInstantiated": false,
+    "checked": [
+      "full sidebar Output",
+      "workspace restore",
+      "third pane",
+      "pointer movement across panes"
+    ],
+    "screenshots": [
+      "native-console-063.png",
+      "native-sidebar-full-output-063.png"
+    ]
+  },
+  "sourceCommits": {
+    "native": "f911c92",
+    "ui": "d735546"
+  },
+  "artifactReceipt": "artifact.json",
+  "cleanup": "Synthetic QA instances closed; temporary bundles unregistered and archived; installed app preserved."
+}

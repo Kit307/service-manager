@@ -1,0 +1,18 @@
+[package]
+name = "glass-smoke-qa"
+version = "0.6.0"
+edition = "2021"
+
+[dependencies]
+service-manager = { path = "/Users/krit/Documents/Codex/2026-10-16/new-chat/service-manager/src-tauri" }
+tauri = { version = "=2.12.4", features = ["tray-icon", "macos-private-api", "custom-protocol"] }
+tauri-plugin-liquid-glass = "=0.1.6"
+serde_json = "1"
+
+[build-dependencies]
+tauri-build = "=2.7.3"
+
+[profile.release]
+strip = true
+lto = "thin"
+codegen-units = 1

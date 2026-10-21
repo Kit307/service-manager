@@ -1,0 +1,321 @@
+{
+  "fullOutput": {
+    "workspaceHidden": true,
+    "fullLogs": true,
+    "tabs": [
+      "Output",
+      "Settings",
+      "History",
+      "Diagnostics",
+      "Open in log workspace"
+    ],
+    "heading": "API server",
+    "layout": [
+      {
+        "id": "fa098fa5-2fbb-417c-9c06-9b4583b313bb",
+        "tabs": [
+          {
+            "projectId": "qa",
+            "serviceId": "fixture-5"
+          },
+          {
+            "projectId": "qa",
+            "serviceId": "fixture-6"
+          },
+          {
+            "projectId": "qa",
+            "serviceId": "fixture-7"
+          },
+          {
+            "projectId": "qa",
+            "serviceId": "fixture-8"
+          },
+          {
+            "projectId": "qa",
+            "serviceId": "fixture-9"
+          },
+          {
+            "projectId": "qa",
+            "serviceId": "fixture-10"
+          },
+          {
+            "projectId": "qa",
+            "serviceId": "fixture-11"
+          },
+          {
+            "projectId": "qa",
+            "serviceId": "fixture-12"
+          }
+        ],
+        "active": "[\"qa\",\"fixture-5\"]"
+      },
+      {
+        "id": "19b2a472-061d-4200-afdf-ed1d52e6664a",
+        "tabs": [
+          {
+            "projectId": "qa",
+            "serviceId": "web"
+          }
+        ],
+        "active": "[\"qa\",\"web\"]"
+      },
+      {
+        "id": "e693de27-71d6-47c1-ad54-17e869677cc2",
+        "tabs": [
+          {
+            "projectId": "qa",
+            "serviceId": "fixture-4"
+          },
+          {
+            "projectId": "qa",
+            "serviceId": "api"
+          }
+        ],
+        "active": "[\"qa\",\"api\"]"
+      },
+      {
+        "id": "520cf9ef-7f40-44b8-a912-68af652fa8d4",
+        "tabs": [
+          {
+            "projectId": "qa",
+            "serviceId": "worker"
+          }
+        ],
+        "active": "[\"qa\",\"worker\"]"
+      }
+    ]
+  },
+  "returnToWorkspace": {
+    "visible": true,
+    "sameLayout": true,
+    "apiTabCount": 1,
+    "totalTabs": 12,
+    "layout": [
+      {
+        "id": "fa098fa5-2fbb-417c-9c06-9b4583b313bb",
+        "tabs": [
+          {
+            "projectId": "qa",
+            "serviceId": "fixture-5"
+          },
+          {
+            "projectId": "qa",
+            "serviceId": "fixture-6"
+          },
+          {
+            "projectId": "qa",
+            "serviceId": "fixture-7"
+          },
+          {
+            "projectId": "qa",
+            "serviceId": "fixture-8"
+          },
+          {
+            "projectId": "qa",
+            "serviceId": "fixture-9"
+          },
+          {
+            "projectId": "qa",
+            "serviceId": "fixture-10"
+          },
+          {
+            "projectId": "qa",
+            "serviceId": "fixture-11"
+          },
+          {
+            "projectId": "qa",
+            "serviceId": "fixture-12"
+          }
+        ],
+        "active": "[\"qa\",\"fixture-5\"]"
+      },
+      {
+        "id": "19b2a472-061d-4200-afdf-ed1d52e6664a",
+        "tabs": [
+          {
+            "projectId": "qa",
+            "serviceId": "web"
+          }
+        ],
+        "active": "[\"qa\",\"web\"]"
+      },
+      {
+        "id": "e693de27-71d6-47c1-ad54-17e869677cc2",
+        "tabs": [
+          {
+            "projectId": "qa",
+            "serviceId": "fixture-4"
+          },
+          {
+            "projectId": "qa",
+            "serviceId": "api"
+          }
+        ],
+        "active": "[\"qa\",\"api\"]"
+      },
+      {
+        "id": "520cf9ef-7f40-44b8-a912-68af652fa8d4",
+        "tabs": [
+          {
+            "projectId": "qa",
+            "serviceId": "worker"
+          }
+        ],
+        "active": "[\"qa\",\"worker\"]"
+      }
+    ]
+  },
+  "sourceBuild": {
+    "builtAt": "2026-10-21T09:18:56.187Z",
+    "sha256": "557375599abb612e2d2e97559f748689d7436ab263cb4d344bdaed047a1d38c7",
+    "files": [
+      {
+        "path": "src/App.tsx",
+        "sha256": "a908fe270dd6e496473152b6a4675d36d4a4fec1b9f5989a055708a10b7c59f8"
+      },
+      {
+        "path": "src/components/AiConnections.tsx",
+        "sha256": "83cd57a72dd3169ca3bfbeffbedea24b3ba2cd9e0dc58ce6a306e2e380bd5996"
+      },
+      {
+        "path": "src/components/FailureAlerts.tsx",
+        "sha256": "38d8b3d6d324a63cf85728360a21446489bd84c4d4fdd9723391916cccf4b9c0"
+      },
+      {
+        "path": "src/components/GroupEditor.tsx",
+        "sha256": "05543d1b91722e17c754d71454cef85f02f703d7f53aef7cef62906633e081f5"
+      },
+      {
+        "path": "src/components/GroupOverview.tsx",
+        "sha256": "bcb4e9003135468fbcb2735d87558019dd049c8174d4a21c9ed8b69d211569c8"
+      },
+      {
+        "path": "src/components/Icon.tsx",
+        "sha256": "55027c8792a8b2787c752605091dc0da399124c0987098bb05ab2dedd1a3ce2d"
+      },
+      {
+        "path": "src/components/LogPanel.tsx",
+        "sha256": "6000979555b8aecdf425138badbdeee3a18ae10375f11bfb208e1d10295132b7"
+      },
+      {
+        "path": "src/components/LogWorkspace.tsx",
+        "sha256": "f0fcd07343a60763d634bf7d9b1acfe9fc0e605d08e3807a06590a84f2457ff1"
+      },
+      {
+        "path": "src/components/ServiceEditor.tsx",
+        "sha256": "82cadf9a754ddf407032c27234965bba2ba4add93d14f92cced8ef868a5a1a26"
+      },
+      {
+        "path": "src/components/ServiceOperations.tsx",
+        "sha256": "a784f3bd32906712481881dbe9be511404336c64140172915a364998683d4741"
+      },
+      {
+        "path": "src/components/ServiceSidebar.tsx",
+        "sha256": "25ff634409f216272ee5d59bfd0d49e95d9682707b36b67f90634ee900856c4f"
+      },
+      {
+        "path": "src/lib/api.ts",
+        "sha256": "0e9af1975340b4ce3631bb23bb10ceed4b8e318169a313aa9c69bb82ead5edae"
+      },
+      {
+        "path": "src/lib/types.ts",
+        "sha256": "deb6324c4e498aab05d8c0da0981835500cf877eca075712c6f42518742b66ce"
+      },
+      {
+        "path": "src/lib/useServiceLogs.ts",
+        "sha256": "3f72c8c1b026909fa50a8596db836372b22b51efd09e5333b239e2fa1800ab94"
+      },
+      {
+        "path": "src/lib/workspace.ts",
+        "sha256": "6aecef5ec924427f6045a0512896b29a997956db2ef30fcb44b463e22df035b5"
+      },
+      {
+        "path": "src/main.tsx",
+        "sha256": "7e473fdac304c4eb006f315f2caaa6dcff5e52787be9b3b9c2f6e848230d30d3"
+      },
+      {
+        "path": "src/styles.css",
+        "sha256": "68a440b44c217f37d757fdb479603eb7a0ecc26c1815ee0a5fca4b55e58b771b"
+      },
+      {
+        "path": "src/styles/glass-surfaces.css",
+        "sha256": "c9cb888fb8aafc384e3d03f6234cac68e493fb7147570bc10360e7cdc2f11d95"
+      },
+      {
+        "path": "src/styles/log-panel.css",
+        "sha256": "a63f90fb848289066d8e663f7da0bc2d947c0fe2cf265434e87a9efe2a30e939"
+      },
+      {
+        "path": "src/styles/log-workspace.css",
+        "sha256": "12bc99edb0ea7fa832b6a3bab9d1613ad8715ce531c1772bda7130123938a6c2"
+      },
+      {
+        "path": "src/styles/operations.css",
+        "sha256": "e62b8ac2f44821f49ae36f2de6d447f0d0b2b867e07e93e36543635ee0ce1242"
+      },
+      {
+        "path": "src/styles/overview.css",
+        "sha256": "6b6ceb53c9915bd5c79b1d3652c70100d6af3872ca7abba63c4663e399a7eb54"
+      },
+      {
+        "path": "src/test/AiProjects.test.tsx",
+        "sha256": "1a19465643e401247f5c7f8ad3cb19bc99f41df548a37fd80a83898d5c89292b"
+      },
+      {
+        "path": "src/test/App.test.tsx",
+        "sha256": "79d69edb680011b873b1d278d64c26c5b226a35fea3ad4cea426726cac7eaca9"
+      },
+      {
+        "path": "src/test/Appearance.test.tsx",
+        "sha256": "058ecb57885fca9ca36b52420258686bea0b2467229f867510bad780f39d16a1"
+      },
+      {
+        "path": "src/test/FailureAlerts.test.tsx",
+        "sha256": "3ee253abc13487a5a7843e32fbd430d1deffb6497d802988ccec6e3ebbe571e7"
+      },
+      {
+        "path": "src/test/GroupOverview.test.tsx",
+        "sha256": "1d6e38c48d0d32d81329f0c72876c4ef157159526ef6436508a622281c361fcf"
+      },
+      {
+        "path": "src/test/Groups.test.tsx",
+        "sha256": "93df295ea3ba4a530a21d899467041e1055b5b1187fa79c2edcbd67cf53dcb79"
+      },
+      {
+        "path": "src/test/LogPanelState.test.tsx",
+        "sha256": "763e984b18740cff3fba666c0dbb3bf82aa0412153607abf44746d57a01e4b9c"
+      },
+      {
+        "path": "src/test/LogSeverity.test.tsx",
+        "sha256": "50835a00c89b61170b771b730ba5e14d94a85a986f34a8bb013a955164a21c3e"
+      },
+      {
+        "path": "src/test/LogWorkspace.test.tsx",
+        "sha256": "451a70dcef5798bf55c85cd5c572aa802d92a29fd4ffd6b9a692daeb9dda211d"
+      },
+      {
+        "path": "src/test/OperationsIntegration.test.tsx",
+        "sha256": "63dd317a646625609aff98c318aa10785fae62f64b86f337c00941909e7864c7"
+      },
+      {
+        "path": "src/test/ServiceOperations.test.tsx",
+        "sha256": "84b7aa70967d3bec7019b88bb99f866941275befed546e9da3acdba60b801185"
+      },
+      {
+        "path": "src/test/setup.ts",
+        "sha256": "9011ef865a8449eeaedf2fe296fd522b02540caeefd204f4cc90ecf9319471b2"
+      },
+      {
+        "path": "src/test/useServiceLogs.test.tsx",
+        "sha256": "004452f8d376e655bf219279035de74fe251165f8b09c2d8ca4d6b6dfa4dc090"
+      },
+      {
+        "path": "src/test/workspace.test.tsx",
+        "sha256": "b24ac7092ab96511d6a318fbc7e191434b7bf32829793052db055fe9a950dfcb"
+      }
+    ]
+  },
+  "testedAt": "2026-10-21T09:19:34.046Z",
+  "errors": [],
+  "mutations": []
+}

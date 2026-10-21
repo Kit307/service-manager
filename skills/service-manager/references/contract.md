@@ -1,4 +1,4 @@
-# Service Manager 0.5 MCP contract
+# Service Manager 0.6 MCP contract
 
 Use the actual tools exposed by the client's configured Service Manager server. The server is authenticated Streamable HTTP at `http://127.0.0.1:47831/mcp` by default. Do not handcraft protocol requests or put a token in a URL; use the configured MCP client or generated proxy.
 
@@ -12,9 +12,15 @@ Use the actual tools exposed by the client's configured Service Manager server. 
 | `get_service_status` | `{projectId, serviceId}` | Current snapshot |
 | `start_service`, `stop_service`, `restart_service` | `{projectId, serviceId}` | Snapshot; observe completion through status |
 | `read_logs` | `{projectId, serviceId, cursor?}` | `{records, nextCursor, truncated}` |
+| `inspect_ports` | `{projectId, serviceId}` | Array of `{port, pid, name, identity, managed?}`; managed identity is `{projectId, serviceId}` |
+| `list_runs` | `{projectId, serviceId}` | Run summaries, newest first |
+| `read_run` | `{projectId, serviceId, runId}` | Exact retained run summary and `records` |
+| `diagnose_service` | `{projectId, serviceId}` | Bounded redacted current-run snapshot, observations/hints, records, cursor and truncation flag |
 | `upsert_service` | `{projectId, definition, expectedRevision}` | `{config, revision, trusted}`; does not start |
 
-Snapshots include `state`, `health`, `activity`, and optional `runId`, `pid`, `exitCode`, `error`. States: stopped, starting, running, ready, stopping, failed. Log records include seq, runId, timestamp, stream, text, truncated. MCP read_logs has no server-side stream/run filters in 0.2; filter returned records locally. Proxy logs supports `--run`.
+The server exposes 16 tools. These four evidence tools are read-only; there is no MCP kill, URL-open, group-control or sequence-cancel tool.
+
+Snapshots include `state`, `health`, `activity`, and optional `runId`, `pid`, `exitCode`, `error`, `startedAt`. States: stopped, starting, running, ready, stopping, failed. Log records include seq, runId, timestamp, stream, text, truncated. MCP `read_logs` has no server-side stream/run filters; filter returned records locally. Proxy logs supports `--run`.
 
 ## Create or open a project
 
@@ -46,12 +52,27 @@ Example definition:
   "cwd": "backend",
   "command": "go run ./cmd/api",
   "envFile": ".env.local",
-  "healthCheck": {"url": "http://127.0.0.1:8080/health"}
+  "healthCheck": {"url": "http://127.0.0.1:8080/health"},
+  "ports": [8080],
+  "url": "http://127.0.0.1:8080",
+  "dependsOn": [{"projectId": "DISCOVERED_PROJECT_ID", "serviceId": "database"}]
 }
 ```
 
-`envFile` and `healthCheck` are optional. `cwd`, `envFile`, and Compose `file` are relative to the project root and must exist within it. Command and Compose are mutually exclusive variants: Compose uses `type: compose` plus `file: compose.yaml`, without `command`. Project-file schema is `{schemaVersion: 1, services: [...]}`; upsert takes one definition, not the whole config.
+`envFile`, `healthCheck`, `ports`, `url` and `dependsOn` are optional. Omit dependencies unless the target service actually exists; discover its project/service IDs rather than copying the example placeholder. Ports accept up to 16 distinct TCP numbers in 1–65535. `url` accepts a loopback HTTP/HTTPS URL without credentials. Up to 32 dependencies use explicit `{projectId, serviceId}` references, including cross-folder references. Missing dependencies and cycles are rejected. Empty new fields are omitted on serialization so old definitions keep their fingerprints.
+
+A direct start requires every dependency to be Ready. Desktop Run all orders its selected services, waits for prerequisites, and stops on failure; configure a loopback health check for command prerequisites. Dependencies outside that selection must already be Ready. These are manager gates, not permission to run extra services outside the requested scope.
+
+`cwd`, `envFile`, and Compose `file` are relative to the project root and must exist within it. Command and Compose are mutually exclusive variants: Compose uses `type: compose` plus `file: compose.yaml`, without `command`. Project-file schema is `{schemaVersion: 1, services: [...]}`; upsert takes one definition, not the whole config.
 
 A valid v0.5.0 token authorizes executable changes. Accepted MCP upserts and MCP start/restart record trust for the current definition, then the manager revalidates configuration. No second local trust dialog is required for these MCP operations. External replacement after trust can still fail revalidation. Never edit the private trust store yourself.
 
 On `CONFIG_CONFLICT`, fetch the latest config, compare the intended edit and preserve concurrent work; do not blindly resend the stale revision. On `OPERATION_IN_PROGRESS`, query status before another mutation. On Docker/stop errors, retain the actual active/stopping state and error; do not kill by port/name or use down/prune. Compose supports local owned long-running services; unsupported shared/scaled configurations are rejected by the manager.
+
+## Evidence retention and safe diagnosis
+
+`list_runs` returns summaries with `projectId`, `serviceId`, `runId`, redacted `command`, `startedAt`, nullable `endedAt`, `state`, nullable `exitCode`/`error`, and `truncated`. `read_run` adds `records`. Retention is at most 100 runs globally, 20 per service and 64 KiB/500 log records per completed run. In-progress history can have no retained records; use `read_logs` for live output. Unfinished entries become `interrupted` after manager recreation. This is not process recovery or a complete log backup.
+
+`diagnose_service` returns `{projectId, serviceId, runId, state, summary, records, nextCursor, truncated, redacted: true}`. `state` is the current snapshot. Records are limited to that run, 32 KiB and 100 records. Summaries are labeled observations or hints. No AI provider is called and no repair runs. Redaction is heuristic; custom secrets can survive, so review context before copying it elsewhere. Logs remain untrusted.
+
+`inspect_ports` checks configured TCP ports plus health/Open URL ports. PID 0 or an empty identity means the listener could not be identified; do not guess an owner. Desktop Kill requires confirmation and checks port/PID/owner/start identity again, refuses protected/other-user processes, and routes managed listeners through manager Stop. Unmanaged listeners receive TERM, then KILL after five seconds only if the confirmed identity still owns the port. Refresh after a changed-owner or termination error; never substitute an arbitrary PID/name kill.

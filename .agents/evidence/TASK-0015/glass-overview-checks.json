@@ -1,0 +1,68 @@
+{
+  "min": {
+    "viewport": [
+      900,
+      600
+    ],
+    "document": [
+      900,
+      600
+    ],
+    "overviewScrollWidth": 680,
+    "overviewWidth": 680,
+    "cards": [
+      {
+        "width": 616,
+        "height": 170.59375,
+        "left": 237,
+        "right": 853
+      },
+      {
+        "width": 616,
+        "height": 170.59375,
+        "left": 237,
+        "right": 853
+      },
+      {
+        "width": 616,
+        "height": 223.7890625,
+        "left": 237,
+        "right": 853
+      }
+    ],
+    "errors": []
+  },
+  "wide": {
+    "viewport": [
+      1600,
+      1000
+    ],
+    "document": [
+      1600,
+      1000
+    ],
+    "overviewScrollWidth": 1368,
+    "overviewWidth": 1368,
+    "cards": [
+      {
+        "width": 389.328125,
+        "height": 170.59375,
+        "left": 316,
+        "right": 705.328125
+      },
+      {
+        "width": 389.3359375,
+        "height": 170.59375,
+        "left": 721.328125,
+        "right": 1110.6640625
+      },
+      {
+        "width": 389.3359375,
+        "height": 223.7890625,
+        "left": 1126.6640625,
+        "right": 1516
+      }
+    ],
+    "errors": []
+  }
+}

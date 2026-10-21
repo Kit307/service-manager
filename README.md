@@ -2,7 +2,7 @@
 
 A desktop app for running project services without typing commands in a terminal.
 
-Version 0.5.1 implements the local desktop workflow: command and owned Docker Compose services, project configuration, live logs, loopback health checks, and authenticated MCP/proxy access share one Rust manager. This is a local macOS development release without Developer ID signing or notarization.
+Version 0.6.1 implements the local desktop workflow: command and owned Docker Compose services, project configuration, live logs, bounded run history, dependency-aware group actions, port diagnostics, loopback health checks, and authenticated MCP/proxy access share one Rust manager. This is a local macOS development release without Developer ID signing or notarization.
 
 ## Selected stack
 
@@ -35,9 +35,11 @@ Run supports foreground noninteractive commands such as `pnpm dev` and `go run .
 
 Use New group or a group's settings to create, rename or remove a group and select its services. Selecting a service moves it from its previous group. Removing a group keeps its services under Ungrouped and never touches code or running processes. Drag a service onto a group or the Ungrouped area to move its membership without changing files or interrupting its run. Settings remains available for keyboard use. Grouping does not limit token access.
 
-Run all skips active services; Stop all and Restart all affect only the services in the selected view. All services applies to the entire workspace. All required trust reviews finish before any batch lifecycle action is submitted; canceling prevents the batch. Results are reported per service, and accepted requests do not imply Ready. Services start independently without dependency ordering. Remove a stopped service through its Settings; this removes its definition and group membership, preserving source files.
+Run all reuses active services and starts dependencies before their dependents. Stop all uses reverse dependency order; Restart all stops and then starts the selection. All services applies to the entire workspace. Required trust reviews finish before execution. A dependency must become Ready before its dependent starts; failures stop the sequence. Cancel sequence prevents later actions and leaves services already started running. Dependencies outside the selection must already be Ready. See [service operations](docs/service-operations.md) for configuration, limits and recovery. Remove a stopped service through its Settings; this removes its definition and group membership, preserving source files.
 
 Closing the window hides it. Use the menu/tray or Dock to reopen it. Quit asks to stop active services first and blocks new starts while cleanup is in progress. Commands run with your normal user permissions; the application is not a sandbox for untrusted repositories. Deliberately detached children and abrupt OS/app termination are outside guaranteed cleanup.
+
+The macOS window uses the Rust-only [tauri-plugin-liquid-glass 0.1.6](https://github.com/hkandala/tauri-plugin-liquid-glass) with the standard native Clear variant on macOS 26+, and an NSVisualEffect blur fallback on older macOS. Text stays opaque and logs use a darker surface for contrast. The plugin uses private APIs, so future macOS compatibility and App Store suitability are not guaranteed. See [the visual approach and verification limits](docs/service-operations.md#liquid-glass). The sidebar Background opacity slider persists a 30–100% background setting (default 55%, steps of 5); text/log opacity is unchanged. Reduced-transparency or high-contrast preferences force opaque backgrounds. Buttons, cards and the tab bar use raised clear-glass capsule rims, highlights and soft shadows.
 
 ## Development
 
@@ -74,7 +76,9 @@ The supported Compose subset is one foreground long-running container per servic
 
 ## Service views and log levels
 
-Output and Settings share the service heading, live status and lifecycle controls. Settings scrolls within the content pane. Switching tabs preserves log filters/follow and unsaved settings; Cancel discards the draft. Saving retains the revision captured when editing began, so background refresh cannot silently overwrite external changes.
+Output, Settings, History and Diagnostics share the service heading, live status and lifecycle controls. Settings scrolls within the content pane. Switching tabs preserves log filters/follow and unsaved settings; Cancel discards the draft. Saving retains the revision captured when editing began, so background refresh cannot silently overwrite external changes.
+
+Clicking a service in the sidebar opens its full Output view. Open in log workspace or a pane picker provides the separate comparison view. The Log workspace keeps multiple service tabs across any number of panes, with no fixed two-pane or tab-count cap. Add a pane, drag tabs to reorder/move them, or use the keyboard controls. Each service has one tab with its own session search, stream filter and follow setting. Only active tabs in visible panes observe logs; hidden/offscreen observers pause and release their local output. Returning reads the manager's bounded output and reports retention gaps. Closing a tab never stops its service. Only layout and explicit service references persist between app launches, not log content or filter/search state. See [log workspace controls](docs/service-operations.md#log-workspace-v061).
 
 Stream labels are `stdout`, `stderr` and `system`; stderr is not itself a severity level. Only an explicit recognized console prefix or JSON string `level` colors a line: errors red and warnings amber. Informational and unknown formats stay neutral, regardless of stream. Message content, raw stream identity and MCP/proxy output are preserved. Numeric levels and arbitrary logger formats are not inferred.
 
@@ -82,6 +86,6 @@ Stream labels are `stdout`, `stderr` and `system`; stderr is not itself a severi
 
 Output is retained in memory with per-service/global bounds. The desktop receives change events in 100 ms batches and fetches bounded pages; it does not continually poll logs while idle. Configuration changes on disk are checked every two seconds. Health checks expose a diagnostic after 30 seconds without success and continue checking for recovery.
 
-No public signing, notarization, publishing, auto-update, SSH, remote control, dependency graph, automatic restart, persistent log archive, or deployment is included. The original plan's broader acceptance matrix is tracked honestly in [verification](docs/verification.md), including measured limits and untested surfaces.
+Run history is stored privately with at most 100 runs overall, 20 per service, and 64 KiB/500 log records per completed run. It is a bounded diagnostic archive, not a full log backup. Redaction is best effort; review copied diagnostic context before sharing. No public signing, notarization, publishing, auto-update, SSH, remote control, automatic restart, or deployment is included. The original plan's broader acceptance matrix is tracked honestly in [verification](docs/verification.md), including measured limits and untested surfaces.
 
 Service rows use captured pointer movement for group changes, avoiding native WebKit HTML drag interception. Drag onto a group, including a collapsed group, or onto Ungrouped to remove membership. Escape, pointer cancellation and drops outside these targets leave membership unchanged. Group Settings remains the keyboard-accessible alternative.

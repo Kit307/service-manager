@@ -1,0 +1,43 @@
+{
+  "checks": {
+    "viewport": [
+      900,
+      600
+    ],
+    "document": [
+      900,
+      600
+    ],
+    "footer": {
+      "left": 12,
+      "right": 192,
+      "top": 553,
+      "bottom": 600
+    },
+    "slider": {
+      "left": 20,
+      "right": 184,
+      "top": 486.5,
+      "bottom": 541
+    },
+    "tabs": {
+      "left": 205,
+      "right": 900,
+      "top": 250,
+      "bottom": 296
+    },
+    "settings": {
+      "left": 205,
+      "right": 900,
+      "top": 296,
+      "bottom": 600
+    },
+    "editorScrollable": true,
+    "errors": [],
+    "mutations": []
+  },
+  "reduced": {
+    "shell": "rgb(32, 36, 43)",
+    "button": "none"
+  }
+}

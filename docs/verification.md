@@ -1,4 +1,18 @@
-# Service Manager 0.5.1 verification
+# Service Manager verification
+
+The current v0.6.3 Liquid Glass interface, background-opacity control, aligned log headers and multi-tab/multi-pane Log workspace, together with the service operations introduced in v0.6.0, is tracked in [MILESTONE-0002](../.agents/milestones/MILESTONE-0002-service-operations.md).
+
+## v0.6.3 source and interaction verification
+
+Frontend: 81 tests in 13 files passed with one worker, plus TypeScript/production build and ESLint. Rust: 51 passed and one opt-in Docker test ignored; formatting and all desktop targets passed Clippy with warnings denied. An earlier concurrent frontend run timed out waiting for fixture data; the unchanged focused and serial full suite passed without increasing timeouts.
+
+Actual-source Chromium fixtures verified 11 tabs and five panes, pointer reorder/cross-pane/new-pane drops including gaps, per-tab search retention, hidden/reopened layout, independent scrolling, and no document overflow at 900 × 600. Header geometry was checked at 360px pane width and 900px window width: tabs, plus, select and close share the same vertical center. Add/Close remain fixed while only tabs scroll. Reduced transparency forces opaque header/pane surfaces. Parallel layout assessment and mechanical scan were used for the header correction; the final scoped detector returned no findings.
+
+The shared native Clear helper was exercised on macOS 27.0.1 through an isolated WebKit fixture with synthetic data. Native pointer movement across panes, three panes and per-tab filtering were exercised. It never instantiated the real manager or ran user services. Release checks and screenshots are recorded in `.agents/evidence/TASK-0015/`; older-macOS fallback, live Docker and external AI sessions were not repeated. The private Apple APIs and upstream block 0.1.6 future Rust incompatibility notice remain compatibility risks. Artifacts are unsigned and not notarized; no installed-app replacement or remote publication is performed.
+
+The final console design uses one search/stream/action row, quieter service tabs, fixed pane actions and 440px default minimum panes. Keyboard native-select overlays, search/filter/follow, clear focus and full-height layout were exercised in light/dark and minimum-size fixtures. Sidebar service clicks always open the original full Output view; returning to Log workspace preserves its tabs and layout. A focused regression catches keyboard focus in a later pane so toolbar moves target the selected tab. See the console redesign and sidebar navigation evidence in TASK-0015.
+
+## Historical v0.5.1 verification
 
 37 frontend tests passed, plus ESLint and TypeScript. Informational stderr is neutral and explicit recognized error/warning levels determine color; raw streams/text remain unchanged. Real Chromium checks verified computed colors and shared service-heading bounds, Settings below the tabs, retained draft/log search and internal scrolling. Creation and stale revision protection remain covered. Isolated native WebKit pointer checks verified moving a service out of a group and into another, including direct cross-group movement. Native titlebar overlay retains traffic lights; resizing clamps at 900 × 600. See `.agents/evidence/TASK-0012/` for details and release evidence.
 

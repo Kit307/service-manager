@@ -1,0 +1,116 @@
+{
+  "initialHidden": true,
+  "cardOpened": {
+    "visible": true,
+    "tabs": 1
+  },
+  "sidebarAppended": true,
+  "filterRetained": true,
+  "unlimitedTabs": 11,
+  "threePanes": 3,
+  "wide": {
+    "viewport": [
+      1600,
+      1000
+    ],
+    "document": [
+      1600,
+      1000
+    ],
+    "panes": 4
+  },
+  "beforePointer": [
+    [
+      "api",
+      "web",
+      "fixture-4",
+      "fixture-5",
+      "fixture-6",
+      "fixture-7",
+      "fixture-8",
+      "fixture-9",
+      "fixture-10",
+      "fixture-11",
+      "fixture-12"
+    ],
+    [],
+    []
+  ],
+  "afterReorder": [
+    [
+      "web",
+      "api",
+      "fixture-4",
+      "fixture-5",
+      "fixture-6",
+      "fixture-7",
+      "fixture-8",
+      "fixture-9",
+      "fixture-10",
+      "fixture-11",
+      "fixture-12"
+    ],
+    [],
+    []
+  ],
+  "afterCrossPane": [
+    [
+      "web",
+      "fixture-4",
+      "fixture-5",
+      "fixture-6",
+      "fixture-7",
+      "fixture-8",
+      "fixture-9",
+      "fixture-10",
+      "fixture-11",
+      "fixture-12"
+    ],
+    [
+      "api"
+    ],
+    []
+  ],
+  "afterNewPaneDrop": [
+    [
+      "fixture-4",
+      "fixture-5",
+      "fixture-6",
+      "fixture-7",
+      "fixture-8",
+      "fixture-9",
+      "fixture-10",
+      "fixture-11",
+      "fixture-12"
+    ],
+    [
+      "api"
+    ],
+    [],
+    [
+      "web"
+    ]
+  ],
+  "hide": true,
+  "reenter": {
+    "visible": true,
+    "layoutSame": true,
+    "apiFilter": "health",
+    "apiVisibleLines": 2
+  },
+  "minimum": {
+    "viewport": [
+      900,
+      600
+    ],
+    "document": [
+      900,
+      600
+    ],
+    "gridWidth": 680,
+    "gridScrollWidth": 680,
+    "panes": 4,
+    "errors": [],
+    "mutations": []
+  }
+}

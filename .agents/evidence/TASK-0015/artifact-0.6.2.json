@@ -1,0 +1,11 @@
+{
+  "version": "0.6.2",
+  "file": "/Users/krit/Documents/Codex/2026-10-16/new-chat/outputs/Service-Manager-0.6.2-macOS-arm64.dmg",
+  "bytes": 9950789,
+  "sha256": "f6b15a020599cf5eac71957b225e85f243d04ce2df02ed233ea2b92f4b45cd8a",
+  "architecture": "arm64",
+  "mountedVersion": "0.6.2",
+  "iconMatchesSource": true,
+  "applicationsLink": "/Applications",
+  "signedAndNotarized": false
+}

@@ -1,0 +1,99 @@
+Window: "Service Manager Console QA", App: Service Manager Console QA.
+0 standard window Service Manager Console QA, Secondary Actions: Raise
+	1 scroll area
+		2 HTML content Description: Service Manager, URL: tauri://localhost
+			3 container Services
+				4 text Service Manager 0.6
+				5 button Add service ↗
+				6 button All services 3
+				7 text Groups
+				8 button New group
+				9 container Groups and services
+					10 container Move service to group Development
+						11 button (expanded) Collapse group Development, Secondary Actions: Collapse
+						12 button Development
+						13 button Edit group Development
+						14 container
+							15 button API server Ready, Help: /tmp/service-manager-glass-qa/sample/. · Drag to a group or Ungrouped
+							16 button Web app Stopped, Help: /tmp/service-manager-glass-qa/sample/. · Drag to a group or Ungrouped
+							17 button Background worker Failed, Help: /tmp/service-manager-glass-qa/sample/. · Drag to a group or Ungrouped
+					18 container Move service to Ungrouped
+						19 text Ungrouped
+						20 text Drag a service here to remove it from a group.
+				21 button Log workspace
+				22 button AI Connections
+				23 container
+					24 text Background opacity
+					25 container Background opacity 85
+						26 text 85%
+					27 slider (settable, float) Background opacity, Value: 85, Details: 85%
+						28 value indicator 85
+				29 text 1  running
+				30 button Change appearance, Help: Appearance: system. Click to change.
+			31 container
+				32 text Log workspace Local workspace
+				33 container Log workspace
+					34 heading Logs, Value: 1
+						35 text Logs
+					36 text 2 tabs/3 panes
+					37 button Move active log tab left, Help: Move tab left · Alt+←
+					38 button Move active log tab right, Help: Move tab right · Alt+→
+					39 pop up button (collapsed) Move active log tab to pane, Value: Choose pane…, Secondary Actions: Expand
+					40 button Add pane
+					41 container Log pane
+						42 tab group (selectable) Open service logs
+							43 tab (selectable) Web app Stopped, Help: /tmp/service-manager-glass-qa/sample · Drag to reorder or another pane. Alt+Arrow moves a tab.
+							44 button Close Web app log tab
+							45 tab (selected) API server Ready, Help: /tmp/service-manager-glass-qa/sample · Drag to reorder or another pane. Alt+Arrow moves a tab.
+							46 button Close API server log tab
+						47 container Open a service log
+							48 pop up button (collapsed) Add service log, Value: Open log…, Secondary Actions: Expand
+						49 button Close log pane, Help: Close pane
+						50 container API server Ready
+							51 container API server logs
+								52 text field (settable) Search logs, Placeholder: Search logs…
+								53 container
+									54 text All streams
+									55 pop up button (collapsed) Output stream, Value: All output, Secondary Actions: Expand
+								56 toggle button Following, Help: Pause following, Value: on
+								57 button Copy, Help: Copy output
+								58 button Clear output
+								59 container Log output
+									60 text 19:30:00
+									61 text system
+									62 text Starting API server · run qa-ready
+									63 text 19:30:00
+									64 text stdout
+									65 text HTTP server listening on http://127.0.0.1:4100
+									66 text 19:30:00
+									67 text stdout
+									68 text Health check passed. Ready to accept requests.
+									69 text 19:30:00
+									70 text stdout
+									71 text GET /health 200 · 2 ms
+								72 text Live output 4 lines
+					73 container Log pane
+						74 tab group (selectable) Open service logs
+						75 container Open a service log
+							76 pop up button (collapsed) Add service log, Value: Open log…, Secondary Actions: Expand
+						77 button Close log pane, Help: Close pane
+						78 text A place for your output
+						79 text Open a service log or drop a tab here.
+					80 container Log pane
+						81 tab group (selectable) Open service logs
+						82 container Open a service log
+							83 pop up button (collapsed) Add service log, Value: Open log…, Secondary Actions: Expand
+						84 button Close log pane, Help: Close pane
+						85 text A place for your output
+						86 text Open a service log or drop a tab here.
+	87 close button
+	88 full screen button Help: this button also has an action to zoom the window, Secondary Actions: zoom the window
+89 menu bar
+	90 Service Manager Console QA
+	91 File
+	92 Edit
+	93 View
+	94 Window
+	95 Help
+
+The focused UI element is 2 HTML content Description: Service Manager, URL: tauri://localhost

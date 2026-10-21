@@ -52,6 +52,8 @@ Claude Code:
 
 ถ้า MCP ยังไม่ปรากฏ ให้ส่ง absolute path ของ Proxy script จากหน้า AI Connections พร้อม service ID ให้ AI proxy รองรับเฉพาะ list/run/logs และไม่หยุด service เมื่อครบเวลาอ่าน log
 
+ตั้งแต่ v0.6.0 skill ครอบคลุม `inspect_ports`, `list_runs`, `read_run` และ `diagnose_service` ด้วย เป็นการอ่านหลักฐานเท่านั้น ไม่เรียกโมเดลหรือแก้ command อัตโนมัติ ประวัติเก็บสูงสุด 100 รอบรวม/20 รอบต่อ service และ log 64 KiB/500 records ต่อรอบที่จบ ส่วน diagnostic ปัจจุบันจำกัด 32 KiB/100 records การปิดข้อมูลลับเป็น best effort ต้องตรวจ context ก่อนส่งต่อ ปุ่ม Kill port อยู่ในแอปและต้องยืนยัน ไม่มี MCP kill tool
+
 ## ตรวจหลังติดตั้ง
 
 ให้ client อ่าน skill และบอกวิธีใช้ `logs --cursor ... --run ... --follow` ต่อจากการ capture ครั้งแรก โดยไม่เริ่ม service ซ้ำ จากนั้นทดสอบกับ service ชั่วคราวที่ตั้งใจเปิดใช้เท่านั้น ตรวจสถานะและ runId ในแอปว่าเป็นชุดเดียวกัน
