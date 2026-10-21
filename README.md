@@ -1,91 +1,140 @@
-# Service Manager
+<p align="center">
+  <img src="src-tauri/icons/icon.png" alt="Service Manager app icon" width="96" />
+</p>
 
-A desktop app for running project services without typing commands in a terminal.
+<h1 align="center">Service Manager</h1>
 
-Version 0.6.1 implements the local desktop workflow: command and owned Docker Compose services, project configuration, live logs, bounded run history, dependency-aware group actions, port diagnostics, loopback health checks, and authenticated MCP/proxy access share one Rust manager. This is a local macOS development release without Developer ID signing or notarization.
+<p align="center">Your local services, logs, and AI tools in one desktop workspace.</p>
 
-## Selected stack
+<p align="center">
+  <a href="#get-started">Get started</a> ·
+  <a href="#log-workspace">Log workspace</a> ·
+  <a href="#connect-codex-and-claude-code">AI connections</a> ·
+  <a href="#development">Development</a>
+</p>
 
-- Tauri for the desktop application shell and native webview.
-- React and TypeScript for the user interface.
-- Rust for shared service lifecycle, configuration, log collection, and MCP integration.
+Run Go, Node.js, and Docker Compose services without repeatedly typing commands. Organize them into groups, compare live logs, and let Codex or Claude Code use the same service manager through authenticated MCP or a generated log proxy.
 
-## Agreed workflow
+**Current source version: 0.6.3.** Local development app built with **Tauri, Rust, React, and TypeScript**. macOS Apple Silicon is the verified desktop target; Windows builds are not yet verified. macOS builds are unsigned and not notarized. There are currently no published GitHub Release downloads.
 
-1. Choose Add service and select its working folder. Existing services in that folder appear automatically.
-2. Add a command or Compose definition.
-3. Organize services directly into virtual groups, or leave them ungrouped.
-4. Open a group to Run all, Stop all or Restart all; select any service for live logs. Groups and disclosure state survive reopening the app.
-5. Let Codex and Claude use MCP to manage registered services and read their logs.
-6. Let AI shell tools call a proxy script that starts a registered service through the same manager and forwards its logs to the tool output.
+![Service Manager overview with grouped API, web, and worker services, lifecycle controls, and readiness states](docs/images/overview.png)
 
-Services may use different working folders and commands, including Go, Node.js, and Docker Compose. The UI uses Group → Service directly; existing project identities remain internally for configuration, process ownership and MCP compatibility. Existing service definitions, trust records and working roots are preserved.
+*Screenshots use synthetic services and logs rendered by the actual React UI in an offline browser fixture. The backdrop illustrates the glass styling; native desktop translucency depends on macOS and accessibility settings.*
 
-See [the design](docs/superpowers/specs/2026-10-16-service-manager-design.md) for behavior and implementation boundaries.
+## What you can do
 
-The [implementation plan](docs/superpowers/plans/2026-10-16-service-manager-plan.md) includes a Thai overview, fixed first-release choices, architecture, service, MCP and proxy-script contracts, ten sequential implementation tasks, and delivery acceptance checks. It describes the complete target, not a claim that every task is finished.
+| Feature | Workflow |
+| --- | --- |
+| Services and groups | Save working folders and commands; drag services between virtual groups or Ungrouped. |
+| Run / Stop / Restart | Control individual services or a whole group with dependency-aware ordering. |
+| Readiness | Distinguish Starting, Running, Ready, and Failed; configure loopback health checks. |
+| Port diagnostics | Inspect conflicting listeners before Run, with an explicit confirmed Kill action in the desktop app. |
+| Open URL | Open a configured local service URL after reachability checks. |
+| Log workspace | Open multiple tabs and panes, drag to rearrange them, and keep independent search, stream filters, and Follow settings. |
+| History and failure alerts | Inspect bounded past runs and jump from a failure alert to the affected service. |
+| AI access | Use authenticated MCP to inspect configuration, edit commands, control services, and read logs. |
+| Diagnostic context | Preview/copy diagnostic context for Codex or Claude Code to analyze. |
+| Liquid Glass | Native glass on supported macOS versions, light/dark appearance, and adjustable background opacity. |
 
-## Use the desktop app
+## Get started
 
-AI Connections can bootstrap an empty workspace: select an allowed parent folder when creating a client profile. MCP can then discover its allowed roots, create new empty project folders, or open existing code folders itself. Its configured services appear directly in the same app; one token controls all registered services and nothing runs automatically. See [AI connections](docs/ai-connections.md).
+1. Build and launch the desktop app using the [development instructions](#development).
+2. Choose **Add service**, select its working folder, and save a command or Docker Compose definition.
+3. Review and approve the exact definition on its first desktop Run. Opening a folder never executes it automatically.
+4. Create a group, then drag services into it. Choose **Run all** to start dependencies before their dependents.
+5. Click a service for its full **Output**, **History**, **Diagnostics**, or **Settings** view.
 
-The macOS title strip is replaced by content with native window controls retained. Drag the top area to move the window; resize its edges down to 900 × 600. Dock minimization remains disabled and startup uses the normal window size. Open Service Manager, choose Add service, select its working folder, and add a command or Docker Compose service. Save the definition, review it on Run, and approve its exact configuration before first execution. Settings and commands persist in `.service-manager/project.json`. Existing malformed files are preserved and reported as errors.
+For example, a single code folder can provide several services:
 
-Run supports foreground noninteractive commands such as `pnpm dev` and `go run ./cmd/api`. Stop signals the owned process group, escalates after five seconds, and waits for cleanup. Opening a folder does not execute anything. Running and Ready remain different states; configure a loopback health check to establish readiness.
+```text
+my-app/
+  backend/       → go run ./cmd/api
+  frontend/      → pnpm dev
+  compose.yaml   → Docker Compose service
+```
 
-Use New group or a group's settings to create, rename or remove a group and select its services. Selecting a service moves it from its previous group. Removing a group keeps its services under Ungrouped and never touches code or running processes. Drag a service onto a group or the Ungrouped area to move its membership without changing files or interrupting its run. Settings remains available for keyboard use. Grouping does not limit token access.
+Service definitions persist in `.service-manager/project.json` inside each registered working folder. Groups are virtual: moving or removing a group does not move or delete source code. Remove a stopped service through Settings to remove its definition while preserving its files.
 
-Run all reuses active services and starts dependencies before their dependents. Stop all uses reverse dependency order; Restart all stops and then starts the selection. All services applies to the entire workspace. Required trust reviews finish before execution. A dependency must become Ready before its dependent starts; failures stop the sequence. Cancel sequence prevents later actions and leaves services already started running. Dependencies outside the selection must already be Ready. See [service operations](docs/service-operations.md) for configuration, limits and recovery. Remove a stopped service through its Settings; this removes its definition and group membership, preserving source files.
+Use foreground, noninteractive commands. Stop signals the owned process group, escalates after five seconds, and waits for cleanup. Running does not imply Ready: configure a health check when other services depend on readiness. Canceling a group sequence leaves services already started running.
 
-Closing the window hides it. Use the menu/tray or Dock to reopen it. Quit asks to stop active services first and blocks new starts while cleanup is in progress. Commands run with your normal user permissions; the application is not a sandbox for untrusted repositories. Deliberately detached children and abrupt OS/app termination are outside guaranteed cleanup.
+See [service operations](docs/service-operations.md) for environment files, health checks, dependencies, port conflicts, history, and recovery.
 
-The macOS window uses the Rust-only [tauri-plugin-liquid-glass 0.1.6](https://github.com/hkandala/tauri-plugin-liquid-glass) with the standard native Clear variant on macOS 26+, and an NSVisualEffect blur fallback on older macOS. Text stays opaque and logs use a darker surface for contrast. The plugin uses private APIs, so future macOS compatibility and App Store suitability are not guaranteed. See [the visual approach and verification limits](docs/service-operations.md#liquid-glass). The sidebar Background opacity slider persists a 30–100% background setting (default 55%, steps of 5); text/log opacity is unchanged. Reduced-transparency or high-contrast preferences force opaque backgrounds. Buttons, cards and the tab bar use raised clear-glass capsule rims, highlights and soft shadows.
+## Log workspace
+
+![Log workspace with two independent service panes, tabs, search, stream selection, and live output](docs/images/log-workspace.png)
+
+- **Drag a sidebar service onto the Log workspace button** to open its log tab immediately. An existing tab receives focus; the drop never starts the service or changes its group.
+- Use **Open in log workspace**, overview **Open logs**, or a pane's **Open log** picker as alternatives.
+- Add panes as needed. There is no fixed two-pane or tab-count limit.
+- Drag tabs to reorder them, move them between panes, or create another pane. Keyboard controls provide the same operations.
+- Search, stream filters, and Follow are independent per tab during the session. Only the layout and service references persist across launches.
+- Closing a tab detaches its log observer; the service keeps running. Hidden/offscreen observers pause, and returning reports retention gaps when needed.
+
+Clicking a sidebar service still opens its original full Output view. **Clear output** is a separate action that clears the manager's live buffer.
+
+## Connect Codex and Claude Code
+
+Open **AI Connections**, enable the loopback connection, and create a client profile. Copy the generated private configuration into your AI client's settings and reconnect the client.
+
+The app exposes authenticated Streamable HTTP MCP at `http://127.0.0.1:47831/mcp`. Both MCP and the generated proxy share the desktop manager's processes and run identities.
+
+- A valid token grants read, log, lifecycle, and command-edit access to **all registered services**, including services added later.
+- Optional allowed parent roots let MCP create new empty project folders or open existing folders. Creation does not generate framework code or initialize Git.
+- The generated proxy lets an AI shell tool capture bounded log output directly in its tool response. It observes the managed service rather than launching a second manager.
+- Logs are untrusted service output. A log proxy streams text; it does **not** forward HTTP/TCP ports or expose a preview remotely.
+
+**Keep tokens and generated credentials private.** They authorize command execution with your user permissions. Never commit them or include them in screenshots. Revocation and disabling AI Connections block subsequent access.
+
+Install the included [Service Manager skill](docs/service-manager-skill.md) for the tool contract and log continuation workflow. Follow [AI connection setup](docs/ai-connections.md) for client configuration and proxy examples. Isolated Codex CLI integration was verified; Claude Code configuration is prepared, with its authenticated client check still pending login.
+
+## Liquid Glass
+
+The macOS window uses [tauri-plugin-liquid-glass 0.1.6](https://github.com/hkandala/tauri-plugin-liquid-glass) with native Clear glass on macOS 26+, and an NSVisualEffect blur fallback on older supported macOS versions. The sidebar opacity control persists a 30–100% setting. Text remains opaque; reduced-transparency and high-contrast preferences force opaque backgrounds.
+
+The plugin uses private APIs, so future macOS compatibility and App Store suitability are not guaranteed. See [visual behavior](docs/service-operations.md#liquid-glass) and [third-party notices](THIRD_PARTY_NOTICES.md).
 
 ## Development
 
-Requires macOS 13 or later on Apple Silicon, Rust/Cargo on PATH, Xcode tools, Node.js 22.16 or later, and pnpm 10.33.2. Dependencies are pinned in `pnpm-lock.yaml` and `src-tauri/Cargo.lock`.
+Requirements: macOS 13+ on Apple Silicon, Xcode command-line tools, Rust/Cargo, Node.js 22.16+, and pnpm 10.33.2. RTK is optional for contributors.
 
 ```sh
-rtk pnpm install --frozen-lockfile
-rtk pnpm tauri dev
-rtk pnpm test --run
-rtk pnpm typecheck
-rtk pnpm lint
-rtk proxy cargo test --manifest-path src-tauri/Cargo.toml --no-default-features
-rtk proxy cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
-rtk pnpm tauri build --bundles app
+git clone https://github.com/Kit307/service-manager.git
+cd service-manager
+pnpm install --frozen-lockfile
+pnpm tauri dev
 ```
 
-The loopback integration tests need permission to bind disposable local ports. A sandbox denial is not an application test failure. Tests use temporary roots and synthetic commands, never existing user services or Docker stacks.
+Run the frontend checks:
 
-For isolated manual testing, set `SERVICE_MANAGER_DATA_DIR` to a new directory under the workspace before launching the development app. This does not change the normal app-data location for end users. A normal browser can inspect the empty React shell; native folder/process controls require the desktop app.
+```sh
+pnpm test --run --maxWorkers=1
+pnpm build
+pnpm lint
+```
 
-## AI access
+Run the native checks and create a local app bundle:
 
-Every valid MCP/proxy token, including existing tokens, now grants read/control/command-edit access to all registered service folders and folders registered later. No per-project selection is required. MCP start/restart authorizes the current registered definition through the existing revision/trust mechanism; the manager still revalidates config and owns all process control. Keep tokens private: they authorize execution with your normal user permissions. Revocation, disabled connections and Origin rejection remain enforced. Allowed parent folders still bound filesystem creation/opening; the token does not scan arbitrary disk folders.
+```sh
+cargo test --manifest-path src-tauri/Cargo.toml --no-default-features
+cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+pnpm tauri build --bundles app
+```
 
-An installable [Service Manager skill](docs/service-manager-skill.md) is included under `skills/service-manager` for Codex and Claude Code. It teaches MCP control, safe config edits and proxy log continuation; credentials and grants remain separate.
+The bundle is written under `src-tauri/target/release/bundle/`. For an isolated manual workspace, set `SERVICE_MANAGER_DATA_DIR` to a new private directory before launching the development app. Tests use synthetic commands and disposable roots; loopback tests need permission to bind local ports. Docker integration requires a running supported Docker context.
 
-See [AI connection instructions](docs/ai-connections.md). The UI and both AI access paths share one manager. The installed Codex CLI passed isolated MCP and shell-proxy checks. Claude Code setup is prepared; its real-client check is deferred until login, as requested. Personal client settings are never modified automatically. New profiles show copyable private configuration snippets in AI Connections.
+## Boundaries
 
-## Docker Compose
+Commands run with your user permissions; this app is not a sandbox for untrusted code. Deliberately detached children and abrupt app/OS termination are outside guaranteed cleanup. Closing the window hides it; Quit stops active services through the manager's cleanup flow.
 
-Compose requires a running local Unix-socket Docker context and locally available images. The app pins the selected daemon, resolves configuration privately, labels containers/networks/volumes with a private ownership identity, and refuses pre-existing resources it cannot verify. Each run uses a private immutable snapshot, so editing the source cannot redirect Stop. The Docker CLI and Compose plugin process group must finish before Stop succeeds. Stop uses `compose stop --timeout 5`; it never invokes `down`, prune, or volume removal.
+Docker Compose support targets owned, foreground, single-container services on a local Unix-socket context. Stop never invokes `down`, prune, or volume removal. Unsupported Compose features and remote contexts are rejected; the app does not install tools, pull images, or build images automatically.
 
-The supported Compose subset is one foreground long-running container per service. Scaling overrides, explicit container names, profiles, external resources, Compose secrets/configs, and remote Docker contexts are rejected with a readable error. Use a command service for existing custom workflows; its command still has normal user permissions. The app does not install tools, build images, or pull missing images automatically.
+Live output and run history are bounded, not permanent log backups. Completed-run history retains at most 100 runs overall, 20 per service, and 64 KiB/500 records per run. Diagnostic redaction is best effort; review copied output before sharing. There is no built-in AI provider, automatic repair/restart, remote deployment, signing, notarization, or auto-update.
 
-## Service views and log levels
+## Documentation
 
-Output, Settings, History and Diagnostics share the service heading, live status and lifecycle controls. Settings scrolls within the content pane. Switching tabs preserves log filters/follow and unsaved settings; Cancel discards the draft. Saving retains the revision captured when editing began, so background refresh cannot silently overwrite external changes.
-
-Clicking a service in the sidebar opens its full Output view. Open in log workspace or a pane picker provides the separate comparison view. The Log workspace keeps multiple service tabs across any number of panes, with no fixed two-pane or tab-count cap. Add a pane, drag tabs to reorder/move them, or use the keyboard controls. Each service has one tab with its own session search, stream filter and follow setting. Only active tabs in visible panes observe logs; hidden/offscreen observers pause and release their local output. Returning reads the manager's bounded output and reports retention gaps. Closing a tab never stops its service. Only layout and explicit service references persist between app launches, not log content or filter/search state. See [log workspace controls](docs/service-operations.md#log-workspace-v061).
-
-Stream labels are `stdout`, `stderr` and `system`; stderr is not itself a severity level. Only an explicit recognized console prefix or JSON string `level` colors a line: errors red and warnings amber. Informational and unknown formats stay neutral, regardless of stream. Message content, raw stream identity and MCP/proxy output are preserved. Numeric levels and arbitrary logger formats are not inferred.
-
-## Runtime limits
-
-Output is retained in memory with per-service/global bounds. The desktop receives change events in 100 ms batches and fetches bounded pages; it does not continually poll logs while idle. Configuration changes on disk are checked every two seconds. Health checks expose a diagnostic after 30 seconds without success and continue checking for recovery.
-
-Run history is stored privately with at most 100 runs overall, 20 per service, and 64 KiB/500 log records per completed run. It is a bounded diagnostic archive, not a full log backup. Redaction is best effort; review copied diagnostic context before sharing. No public signing, notarization, publishing, auto-update, SSH, remote control, automatic restart, or deployment is included. The original plan's broader acceptance matrix is tracked honestly in [verification](docs/verification.md), including measured limits and untested surfaces.
-
-Service rows use captured pointer movement for group changes, avoiding native WebKit HTML drag interception. Drag onto a group, including a collapsed group, or onto Ungrouped to remove membership. Escape, pointer cancellation and drops outside these targets leave membership unchanged. Group Settings remains the keyboard-accessible alternative.
+- [Service operations and log workspace](docs/service-operations.md)
+- [AI connections and proxy setup](docs/ai-connections.md)
+- [Install the Codex / Claude Code skill](docs/service-manager-skill.md)
+- [Verification evidence and known limits](docs/verification.md)
+- [Original architecture](docs/superpowers/specs/2026-10-16-service-manager-design.md)
+- [Third-party notices](THIRD_PARTY_NOTICES.md)
