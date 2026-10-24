@@ -15,7 +15,7 @@
 
 Run Go, Node.js, and Docker Compose services without repeatedly typing commands. Organize them into groups, compare live logs, and let Codex or Claude Code use the same service manager through authenticated MCP or a generated log proxy.
 
-**Current source version: 0.6.3.** Local development app built with **Tauri, Rust, React, and TypeScript**. macOS Apple Silicon is the verified desktop target; Windows builds are not yet verified. macOS builds are unsigned and not notarized. There are currently no published GitHub Release downloads.
+**Current source version: 0.7.0.** Local development app built with **Tauri, Rust, React, and TypeScript**. macOS Apple Silicon is the verified desktop target; Windows builds are not yet verified. macOS builds are unsigned and not notarized. There are currently no published GitHub Release downloads.
 
 ![Service Manager overview with grouped API, web, and worker services, lifecycle controls, and readiness states](docs/images/overview.png)
 
@@ -79,11 +79,11 @@ Open **AI Connections**, enable the loopback connection, and create a client pro
 The app exposes authenticated Streamable HTTP MCP at `http://127.0.0.1:47831/mcp`. Both MCP and the generated proxy share the desktop manager's processes and run identities.
 
 - A valid token grants read, log, lifecycle, and command-edit access to **all registered services**, including services added later.
-- Optional allowed parent roots let MCP create new empty project folders or open existing folders. Creation does not generate framework code or initialize Git.
+- Every valid token can create new empty project folders or open existing folders anywhere the app has OS access. No additional folder grants are needed, including for existing tokens. Creation does not generate framework code or initialize Git.
 - The generated proxy lets an AI shell tool capture bounded log output directly in its tool response. It observes the managed service rather than launching a second manager.
 - Logs are untrusted service output. A log proxy streams text; it does **not** forward HTTP/TCP ports or expose a preview remotely.
 
-**Keep tokens and generated credentials private.** They authorize command execution with your user permissions. Never commit them or include them in screenshots. Revocation and disabling AI Connections block subsequent access.
+**Keep tokens and generated credentials private.** They authorize project creation/opening and command execution with your user permissions. Never commit them or include them in screenshots. Revocation and disabling AI Connections block subsequent access.
 
 Install the included [Service Manager skill](docs/service-manager-skill.md) for the tool contract and log continuation workflow. Follow [AI connection setup](docs/ai-connections.md) for client configuration and proxy examples. Isolated Codex CLI integration was verified; Claude Code configuration is prepared, with its authenticated client check still pending login.
 

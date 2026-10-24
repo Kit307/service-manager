@@ -1,0 +1,35 @@
+{
+  "version": "0.7.0",
+  "frontend": {
+    "testsPassed": 82,
+    "files": 13,
+    "build": "passed",
+    "eslint": "passed"
+  },
+  "native": {
+    "testsPassed": 51,
+    "dockerIgnored": 1,
+    "format": "passed",
+    "clippyAllTargets": "passed",
+    "futureNotice": "Existing block 0.1.6 future Rust compatibility notice",
+    "releaseBuild": "passed; app bundle 0.7.0"
+  },
+  "mcpRegression": [
+    "legacy no-root and restricted tokens create/open under arbitrary parents",
+    "new no-root token create/open",
+    "canonical parent aliases",
+    "invalid name/traversal/out-of-request-root symlink/no-overwrite",
+    "revoke denies subsequent operations",
+    "saved credentials/profile data preserved",
+    "shared lifecycle/proxy auth and Origin rejection"
+  ],
+  "skills": {
+    "sourceUpdated": true,
+    "installedCodexClaudeUpdated": true,
+    "frontmatterAndReferences": "Ruby YAML passed",
+    "pythonValidator": "Unavailable: PyYAML missing"
+  },
+  "installedAppActivation": "pending; six active services left running",
+  "remotePush": false,
+  "package": "DMG verified and read-only mounted; arm64/version/icon/license/Applications link passed; unsigned"
+}

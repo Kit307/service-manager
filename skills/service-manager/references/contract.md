@@ -1,11 +1,11 @@
-# Service Manager 0.6 MCP contract
+# Service Manager 0.7 MCP contract
 
 Use the actual tools exposed by the client's configured Service Manager server. The server is authenticated Streamable HTTP at `http://127.0.0.1:47831/mcp` by default. Do not handcraft protocol requests or put a token in a URL; use the configured MCP client or generated proxy.
 
 | Tool | Arguments | Result |
 | --- | --- | --- |
 | `list_projects` | `{}` | `{projects: [{id, name}]}` for all registered working folders, including later additions |
-| `list_project_roots` | `{}` | `{roots: [{path}]}` for this client's parent-folder grants |
+| `list_project_roots` | `{}` | `{roots: [{path}]}` with filesystem roots available to every valid token |
 | `create_project` | `{root, name}` | Project `{id, name, path, config, revision, trusted, runtime}`; creates one new empty child folder |
 | `open_project` | `{root, relativePath}` | Same project shape; registers an existing folder inside the root |
 | `list_services`, `get_project_config` | `{projectId}` | `{config, revision, trusted, runtime}` |
@@ -24,14 +24,14 @@ Snapshots include `state`, `health`, `activity`, and optional `runId`, `pid`, `e
 
 ## Create or open a project
 
-In AI Connections, the user selects allowed parent folders for a client. Creating a token requires only a name. Every valid token, including existing tokens after upgrading to v0.5.0, grants full read/control/edit access to every registered working folder. Parent-folder grants are optional and remain necessary only for filesystem creation/opening. Existing profiles receive no new filesystem roots automatically.
+From v0.7.0 every valid token, including existing tokens, grants project creation/opening in any folder accessible to the app's OS user. No per-client allowed folders or later grants are required. The token also retains full read/control/edit access to all registered services. Token values and client configuration remain unchanged on upgrade; authentication, revocation, Origin rejection and disabled connections remain enforced.
 
-1. Call `list_project_roots` and use an exact returned `path` as `root`.
-2. For a new project, call `create_project` with `name` set to a single new child folder name. It will not overwrite an existing path, scaffold files, initialize git, or run commands.
-3. For existing code, call `open_project` with a relative folder path under that root. `relativePath: "."` opens the root itself. Absolute paths, parent traversal and symlinks resolving outside the root are rejected. If the granted root was replaced with an outside symlink, select it again locally.
-4. Use the returned `id` with the service tools. Registered services become available to every valid token. Opening does not run them. Successful MCP upserts record trust; MCP start/restart authorizes the current registered command before the shared manager revalidates it.
+1. Call `list_project_roots` to inspect the running server. On macOS it returns `/`; Windows returns available drive roots. These are discovery hints, not a per-client allowlist. An empty list on macOS indicates an older server/profile; update/reconnect rather than bypass its policy.
+2. For a new project, call `create_project` with `root` set to any existing absolute parent directory and `name` set to one new child folder name. It never overwrites a path, scaffolds files, initializes git, or runs commands.
+3. For existing code, call `open_project` with an existing absolute parent `root` and a relative folder path. `relativePath: "."` opens that parent itself. Parent aliases are canonicalized. Absolute relative paths, parent traversal and symlinks resolving outside the chosen request root are rejected; select the intended directory as the root explicitly.
+4. Use the returned `id` with the service tools. Opening does not run services. Successful MCP upserts record trust; MCP start/restart authorizes the current command before shared-manager revalidation.
 
-If folder grants are empty, the user must select an allowed folder locally. There is no automatic machine-wide filesystem grant. Proxy commands remain `list`, `run`, and `logs`; creation/opening requires MCP.
+macOS privacy permissions and filesystem permissions still apply. The token does not bypass the OS, provide general-purpose file reads/deletion, or add new tools. Proxy commands remain `list`, `run`, and `logs`; project creation/opening uses MCP.
 
 After a timeout or application-state write failure, do not blindly retry creation or delete the folder: it may already exist and the project may be visible locally even if a later response failed. Check `list_projects` and use `open_project` on the intended folder after resolving the error. No user files are removed to roll back a registration failure.
 

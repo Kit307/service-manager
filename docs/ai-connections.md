@@ -8,17 +8,17 @@ In AI Connections, enable the connection, name a client profile and choose Creat
 
 Tokens authorize execution and command changes with your user permissions. MCP start/restart records trust for the current registered definition, then the shared manager revalidates before execution. Config revisions, path validation, process ownership, authentication, disabled connections and revocation remain enforced. The token is not a read-only credential.
 
-Optional allowed parent folders bound `create_project`/`open_project` filesystem operations. Select them only when the AI should register folders itself. Existing profiles receive no new filesystem roots automatically. A token alone can already access all folders registered in the app.
+From v0.7.0 every valid token also creates/opens projects in any folder accessible to the app, without selecting parent folders. Existing tokens adopt this full-access policy without rotation or client config changes. OS filesystem and macOS privacy permissions still apply. Old `projectRoots` settings are preserved for rollback but no longer restrict the new server.
 
 ## AI creates or opens a project
 
 The v0.3.0 MCP tools are:
 
-- `list_project_roots {}` returns the client's allowed parent paths.
-- `create_project {root, name}` creates one new empty child folder and registers it; existing paths are never overwritten.
-- `open_project {root, relativePath}` registers an existing folder inside a returned root, preserving its saved services.
+- `list_project_roots {}` returns filesystem roots (for example `/` on macOS); any existing absolute parent directory is also accepted as `root`.
+- `create_project {root, name}` creates one new empty child folder under an existing absolute parent and registers it; existing paths are never overwritten.
+- `open_project {root, relativePath}` registers an existing relative folder inside an existing absolute parent, preserving its saved services.
 
-Use the returned project `id` with `get_project_config` and the service tools. Their configured services appear directly in the desktop workspace without starting them. Since v0.4.0 the UI uses Group → Service; MCP retains project IDs as working-folder/configuration identities for compatibility. Every valid v0.5.0 token can access these services. Creation does not generate framework code or initialize git. Absolute relative paths, parent traversal and out-of-root symlinks are rejected. Parent-folder access does not itself trust existing executable settings.
+Use the returned project `id` with `get_project_config` and the service tools. Their configured services appear directly in the desktop workspace without starting them. Since v0.4.0 the UI uses Group → Service; MCP retains project IDs as working-folder/configuration identities for compatibility. Every valid v0.5.0 token can access these services. Creation does not generate framework code or initialize git. Absolute relative paths, parent traversal and out-of-root symlinks are rejected. Project registration never automatically starts commands.
 
 If a create request times out or saving workspace registration fails, the empty folder/project may already exist locally. After resolving the error, inspect the workspace and use `open_project` rather than overwriting/deleting it or repeatedly calling `create_project`. The proxy retains only its existing list/run/logs interface; project creation/opening uses MCP.
 
@@ -80,7 +80,7 @@ The desktop Diagnostics tab previews/copies context for a connected Codex/Claude
 
 ## Verification boundary
 
-The repository test uses a real official SDK client, authenticated loopback server, real registered foreground process, and actual proxy subprocess. It checks shared run identity, output forwarding, duration detachment, unauthorized requests, token-wide access to later registered folders, legacy-token editing, allowed parent roots, Origin rejection, private credential permissions, and token revocation.
+The repository test uses a real official SDK client, authenticated loopback server, real registered foreground process, and actual proxy subprocess. It checks shared run identity, output forwarding, duration detachment, unauthorized requests, token-wide access to later registered folders, legacy-token editing, full-access creation/opening with legacy and new tokens, path validation, Origin rejection, private credential permissions, and token revocation.
 
 No existing personal client settings have been modified. On 2026-10-16 the installed Codex CLI read synthetic logs through MCP, used the generated proxy through its shell tool, and confirmed the shared marker. The harness uses per-invocation MCP configuration and a temporary synthetic project. Those historical client checks used the older scoped policy. Claude Code reported unavailable authentication; the user selected preparing configuration first, so its model-level check is deferred. These CLI results do not certify the Codex desktop app, Claude Desktop, or cloud clients. Local loopback access is not automatically available to cloud/remote sessions.
 
@@ -92,4 +92,4 @@ Official references checked during planning: [OpenAI MCP configuration](https://
 
 ## Optional agent skill
 
-Install the bundled [Service Manager skill](service-manager-skill.md) to teach clients the actual tool contracts and proxy continuation behavior. Installing the skill does not connect MCP, issue credentials, or create parent-folder grants.
+Install the bundled [Service Manager skill](service-manager-skill.md) to teach clients the actual tool contracts and proxy continuation behavior. Installing the skill does not connect MCP, issue credentials, or grant OS filesystem/privacy permissions.

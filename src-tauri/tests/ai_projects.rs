@@ -7,7 +7,7 @@ use service_manager::{
 };
 
 #[tokio::test]
-async fn mcp_creates_and_opens_projects_only_inside_approved_roots() {
+async fn all_tokens_create_and_open_projects_without_folder_grants() {
     let root = tempfile::tempdir().unwrap();
     let outside = tempfile::tempdir().unwrap();
     let state = tempfile::tempdir().unwrap();
@@ -45,25 +45,21 @@ async fn mcp_creates_and_opens_projects_only_inside_approved_roots() {
     let roots = call(&client, "list_project_roots", json!({}))
         .await
         .unwrap();
-    assert_eq!(roots["roots"][0]["path"], root_path.to_str().unwrap());
+    assert_eq!(roots["roots"], json!([{"path":"/"}]));
     assert_eq!(
         call(&legacy, "list_project_roots", json!({}))
             .await
-            .unwrap()["roots"],
-        json!([])
+            .unwrap(),
+        roots
     );
-    assert_eq!(
-        call(
-            &legacy,
-            "create_project",
-            json!({"root":root_path,"name":"denied"})
-        )
-        .await
-        .unwrap_err()
-        .code,
-        "PERMISSION_DENIED"
-    );
-    assert!(!root_path.join("denied").exists());
+    assert_eq!(bridge.status().await["clients"][1]["scope"], "filesystem");
+    assert!(call(
+        &legacy,
+        "create_project",
+        json!({"root":"relative-root","name":"invalid"})
+    )
+    .await
+    .is_err());
     for name in ["../escape", "/absolute", ".", "a/b", ""] {
         assert!(call(
             &client,
@@ -73,14 +69,6 @@ async fn mcp_creates_and_opens_projects_only_inside_approved_roots() {
         .await
         .is_err());
     }
-    assert!(call(
-        &client,
-        "create_project",
-        json!({"root":outside.path(),"name":"denied"})
-    )
-    .await
-    .is_err());
-    assert!(!outside.path().join("denied").exists());
     for relative in ["../", "/", "escape", "existing/source.txt"] {
         assert!(call(
             &client,
@@ -91,6 +79,35 @@ async fn mcp_creates_and_opens_projects_only_inside_approved_roots() {
         .is_err());
     }
     assert!(manager.projects().await.is_empty());
+    let legacy_created = call(
+        &legacy,
+        "create_project",
+        json!({"root":outside.path(),"name":"legacy-project"}),
+    )
+    .await
+    .unwrap();
+    assert!(outside.path().join("legacy-project").is_dir());
+    let legacy_opened = call(
+        &legacy,
+        "open_project",
+        json!({"root":outside.path(),"relativePath":"legacy-project"}),
+    )
+    .await
+    .unwrap();
+    assert_eq!(legacy_opened["id"], legacy_created["id"]);
+    // Absolute parent aliases are normalized before the per-request path guard.
+    let alias = root_path.join("parent-alias");
+    std::os::unix::fs::symlink(outside.path(), &alias).unwrap();
+    assert_eq!(
+        call(
+            &legacy,
+            "open_project",
+            json!({"root":alias,"relativePath":"legacy-project"})
+        )
+        .await
+        .unwrap()["id"],
+        legacy_created["id"]
+    );
     let created = call(
         &client,
         "create_project",
@@ -120,20 +137,20 @@ async fn mcp_creates_and_opens_projects_only_inside_approved_roots() {
         std::fs::read_to_string(existing.join("source.txt")).unwrap(),
         "keep this"
     );
-    assert_eq!(manager.projects().await.len(), 2);
+    assert_eq!(manager.projects().await.len(), 3);
     assert_eq!(
         call(&client, "list_projects", json!({})).await.unwrap()["projects"]
             .as_array()
             .unwrap()
             .len(),
-        2
+        3
     );
     assert_eq!(
         call(&legacy, "list_projects", json!({})).await.unwrap()["projects"]
             .as_array()
             .unwrap()
             .len(),
-        2
+        3
     );
     let saved = call(&legacy,"upsert_service",json!({"projectId":id,"expectedRevision":created["revision"],"definition":{"id":"web","name":"Web","cwd":".","type":"command","command":"printf marker"}})).await.unwrap();
     assert_eq!(saved["config"]["services"][0]["id"], "web");
@@ -153,8 +170,48 @@ async fn mcp_creates_and_opens_projects_only_inside_approved_roots() {
     .await
     .unwrap();
     assert_eq!(reopened["id"], opened["id"]);
+    let fresh = bridge
+        .create(
+            "Fresh token".into(),
+            vec![],
+            false,
+            false,
+            vec![],
+            std::path::PathBuf::from(env!("CARGO_BIN_EXE_service-manager")),
+        )
+        .await
+        .unwrap();
+    let fresh_client = connect(Credentials {
+        endpoint: bridge.endpoint.clone(),
+        token: fresh.token.clone(),
+    })
+    .await
+    .unwrap();
+    let fresh_project = call(
+        &fresh_client,
+        "create_project",
+        json!({"root":outside.path(),"name":"fresh-project"}),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        call(
+            &fresh_client,
+            "open_project",
+            json!({"root":outside.path(),"relativePath":"fresh-project"})
+        )
+        .await
+        .unwrap()["id"],
+        fresh_project["id"]
+    );
+    assert!(fresh_project["runtime"].as_object().unwrap().is_empty());
+    let stored = std::fs::read(state.path().join("clients.json")).unwrap();
     let loaded = AiBridge::new(manager.clone(), state.path().into(), port).unwrap();
-    assert!(loaded.authorize("builder").await.is_ok());
+    assert!(loaded.authenticate_token("legacy-token").await.is_some());
+    assert_eq!(
+        std::fs::read(state.path().join("clients.json")).unwrap(),
+        stored
+    );
     bridge.revoke("builder").await.unwrap();
     assert!(call(
         &client,
@@ -164,14 +221,25 @@ async fn mcp_creates_and_opens_projects_only_inside_approved_roots() {
     .await
     .is_err());
     assert!(!root_path.join("revoked").exists());
+    assert!(call(
+        &client,
+        "open_project",
+        json!({"root":outside.path(),"relativePath":"legacy-project"})
+    )
+    .await
+    .is_err());
+    assert!(call(&client, "list_project_roots", json!({}))
+        .await
+        .is_err());
+    let _ = fresh_client.cancel().await;
+
     let _ = client.cancel().await;
     let _ = legacy.cancel().await;
     bridge.set_enabled(false).await.unwrap();
 }
 
 #[tokio::test]
-async fn profiles_can_start_with_only_roots_and_reject_non_directory_grants() {
-    let root = tempfile::tempdir().unwrap();
+async fn new_profiles_have_full_access_and_preserve_token_compatibility() {
     let state = tempfile::tempdir().unwrap();
     let manager = Manager::new(state.path().into()).unwrap();
     let bridge = AiBridge::new(manager, state.path().into(), 47831).unwrap();
@@ -180,46 +248,25 @@ async fn profiles_can_start_with_only_roots_and_reject_non_directory_grants() {
         .create("".into(), vec![], false, false, vec![], executable.clone())
         .await
         .is_err());
-    let file = root.path().join("file.txt");
-    std::fs::write(&file, "keep").unwrap();
-    assert!(bridge
-        .create(
-            "File scope".into(),
-            vec![],
-            false,
-            false,
-            vec![file.to_string_lossy().into_owned()],
-            executable.clone()
-        )
-        .await
-        .is_err());
     assert!(bridge.clients.lock().await.is_empty());
     let created = bridge
         .create(
-            "Root client".into(),
+            "Full access".into(),
             vec![],
             false,
             false,
-            vec![root.path().to_string_lossy().into_owned()],
+            vec![],
             executable,
         )
         .await
         .unwrap();
     let loaded = AiBridge::new(bridge.manager.clone(), state.path().into(), 47831).unwrap();
-    assert!(
-        loaded
-            .authenticate_token(&created.token)
-            .await
-            .unwrap()
-            .edit
-    );
+    let profile = loaded.authenticate_token(&created.token).await.unwrap();
+    assert!(profile.edit && profile.control);
     let status = loaded.status().await;
     assert_eq!(status["clients"][0]["projects"], json!([]));
-    assert_eq!(
-        status["clients"][0]["projectRoots"][0],
-        root.path().canonicalize().unwrap().to_str().unwrap()
-    );
-    assert!(loaded.authenticate_token(&created.token).await.is_some());
+    assert_eq!(status["clients"][0]["projectRoots"], json!(["/"]));
+    assert_eq!(status["clients"][0]["scope"], "filesystem");
 }
 
 #[test]

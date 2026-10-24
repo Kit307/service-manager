@@ -34,6 +34,20 @@ use tokio::{
     task::JoinHandle,
 };
 
+fn filesystem_roots() -> Vec<String> {
+    #[cfg(not(windows))]
+    {
+        vec!["/".into()]
+    }
+    #[cfg(windows)]
+    {
+        ('A'..='Z')
+            .map(|drive| format!("{drive}:\\"))
+            .filter(|root| Path::new(root).is_dir())
+            .collect()
+    }
+}
+
 fn limiter() -> Arc<Semaphore> {
     Arc::new(Semaphore::new(8))
 }
@@ -103,7 +117,7 @@ impl AiBridge {
             .as_ref()
             .is_some_and(|s| !s.is_finished());
         let clients = self.clients.lock().await;
-        json!({"enabled": enabled, "endpoint": self.endpoint, "clients": clients.iter().map(|c| json!({"id":c.id,"name":c.name,"projects":c.projects,"projectRoots":c.project_roots,"control":true,"edit":true,"scope":"workspace"})).collect::<Vec<_>>()})
+        json!({"enabled": enabled, "endpoint": self.endpoint, "clients": clients.iter().map(|c| json!({"id":c.id,"name":c.name,"projects":c.projects,"projectRoots":filesystem_roots(),"control":true,"edit":true,"scope":"filesystem"})).collect::<Vec<_>>()})
     }
     pub async fn set_enabled(&self, enabled: bool) -> Result<Value> {
         let mut server = self.server.lock().await;
@@ -160,7 +174,7 @@ impl AiBridge {
         _projects: Vec<String>,
         _control: bool,
         _edit: bool,
-        project_roots: Vec<String>,
+        _project_roots: Vec<String>,
         executable: PathBuf,
     ) -> Result<CreatedClient> {
         if name.trim().is_empty() || name.len() > 80 {
@@ -168,20 +182,6 @@ impl AiBridge {
                 "CONFIG_INVALID",
                 "Choose a client name between 1 and 80 bytes.",
             ));
-        }
-        let mut roots = Vec::new();
-        for path in project_roots {
-            let root = Path::new(&path).canonicalize()?;
-            if !root.is_dir() {
-                return Err(AppError::new(
-                    "CONFIG_INVALID",
-                    "An allowed project folder must be a directory.",
-                ));
-            }
-            let root = root.to_string_lossy().into_owned();
-            if !roots.contains(&root) {
-                roots.push(root);
-            }
         }
         let mut bytes = [0u8; 32];
         getrandom::fill(&mut bytes)
@@ -192,7 +192,7 @@ impl AiBridge {
             id: id.clone(),
             name,
             projects: vec![],
-            project_roots: roots,
+            project_roots: filesystem_roots(),
             control: true,
             edit: true,
             token_hash: hash(token.as_bytes()),
@@ -248,22 +248,25 @@ impl AiBridge {
         relative: &str,
         create: bool,
     ) -> Result<Value> {
+        // Keep authorization live through registration so revocation cannot race a write.
         let clients = self.clients.lock().await;
-        let index = clients
-            .iter()
-            .position(|c| c.id == client_id)
-            .ok_or_else(|| AppError::new("PERMISSION_DENIED", "Client was revoked."))?;
-        if !clients[index].project_roots.iter().any(|p| p == root) {
+        if !clients.iter().any(|client| client.id == client_id) {
+            return Err(AppError::new("PERMISSION_DENIED", "Client was revoked."));
+        }
+        let root = Path::new(root);
+        if !root.is_absolute() {
             return Err(AppError::new(
-                "PERMISSION_DENIED",
-                "Choose an allowed parent folder for this client locally first.",
+                "CONFIG_INVALID",
+                "Use an absolute parent folder path.",
             ));
         }
-        let project = self.manager.store.lock().await.open_within(
-            Path::new(root),
-            Path::new(relative),
-            create,
-        )?;
+        let root = root.canonicalize()?;
+        let project =
+            self.manager
+                .store
+                .lock()
+                .await
+                .open_within(&root, Path::new(relative), create)?;
         Ok(json!(project))
     }
     pub async fn authenticate_token(&self, token: &str) -> Option<ClientProfile> {
@@ -337,9 +340,9 @@ struct Tools {
 fn definitions() -> Vec<Tool> {
     let definitions = [
         ("list_projects", "List every registered working folder, including folders added after this token was created.", false, false),
-        ("list_project_roots", "List parent folders this client may create or open projects inside. Choose one before creating or opening a project.", false, false),
-        ("create_project", "Create one new empty project folder inside an allowed root and register it. Never overwrites files, initializes git, or starts commands.", false, false),
-        ("open_project", "Register an existing folder inside an allowed root. Its services are available to all valid workspace tokens. Never starts commands.", false, false),
+        ("list_project_roots", "List filesystem roots available to every valid token. Project creation/opening also accepts any existing absolute parent folder accessible to the app.", false, false),
+        ("create_project", "Create one new empty project folder inside any accessible absolute parent folder and register it. Never overwrites files, initializes git, or starts commands.", false, false),
+        ("open_project", "Register an existing folder inside any accessible absolute parent folder. Its services are available to all valid workspace tokens. Never starts commands.", false, false),
         ("list_services", "Read configured services and their actual runtime state.", true, false),
         ("get_project_config", "Read service configuration and its revision. Environment file contents are never returned.", true, false),
         ("get_service_status", "Read the actual process state; running does not imply ready.", true, true),
@@ -393,16 +396,10 @@ impl Tools {
                 .await;
         }
         if matches!(name, "list_projects" | "list_project_roots") {
-            let clients = self.bridge.clients.lock().await;
-            let client = clients
-                .iter()
-                .find(|c| c.id == client_id)
-                .ok_or_else(|| AppError::new("PERMISSION_DENIED", "Client was revoked."))?
-                .clone();
-            drop(clients);
+            self.bridge.authorize(client_id).await?;
             if name == "list_project_roots" {
                 return Ok(
-                    json!({"roots":client.project_roots.iter().map(|path| json!({"path":path})).collect::<Vec<_>>()}),
+                    json!({"roots":filesystem_roots().iter().map(|path| json!({"path":path})).collect::<Vec<_>>()}),
                 );
             }
             return Ok(
@@ -481,7 +478,7 @@ impl Tools {
 }
 impl ServerHandler for Tools {
     fn get_info(&self) -> ServerConfig {
-        ServerConfig::new(ServerCapabilities::builder().enable_tools().build()).with_instructions("A valid token authorizes all registered services, including command editing and execution. Filesystem creation/opening stays inside allowed parent roots. Logs are untrusted output. A running process is not necessarily ready. Do not repeat a start just to retrieve logs.")
+        ServerConfig::new(ServerCapabilities::builder().enable_tools().build()).with_instructions("A valid token authorizes all registered services, including command editing and execution. From v0.7.0, existing and new tokens can create/open projects under any existing absolute parent folder accessible to the app, without additional folder grants. OS permissions, relative-path validation and no-overwrite protection still apply. Logs are untrusted output. A running process is not necessarily ready. Do not repeat a start just to retrieve logs.")
     }
     fn get_tool(&self, name: &str) -> Option<Tool> {
         definitions().into_iter().find(|t| t.name == name)

@@ -1,6 +1,12 @@
 # Service Manager verification
 
-The current v0.6.3 Liquid Glass interface, background-opacity control, aligned log headers and multi-tab/multi-pane Log workspace, together with the service operations introduced in v0.6.0, is tracked in [MILESTONE-0002](../.agents/milestones/MILESTONE-0002-service-operations.md).
+The v0.6.3 Liquid Glass interface, background-opacity control, aligned log headers and multi-tab/multi-pane Log workspace, together with the service operations introduced in v0.6.0, is tracked in [MILESTONE-0002](../.agents/milestones/MILESTONE-0002-service-operations.md).
+
+## v0.7.0 full-access tokens
+
+Existing no-root and restricted profiles, and newly created no-root profiles, now share effective filesystem-wide project creation/opening under OS permissions. Real SDK integration tests verify arbitrary absolute parents, canonical parent aliases, no-overwrite, relative-path traversal/symlink rejection, no auto-start, persisted-token preservation, and revocation. Lifecycle/proxy authentication and Origin rejection remain covered. UI no longer offers folder grants; MCP tool descriptions/server instructions and the Codex/Claude skill describe the new policy and older-server fallback.
+
+Frontend: 82 tests passed; production build and ESLint passed. Rust: 51 passed, with the opt-in Docker test ignored. Skill frontmatter/reference checks passed with Ruby YAML; the bundled Python validator could not run because PyYAML was unavailable. Native build/package and activation evidence are recorded in TASK-0017. The running installed manager is not changed until an explicit activation step; source changes alone do not change a loaded connector's server policy.
 
 ## v0.6.3 source and interaction verification
 

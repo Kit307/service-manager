@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { api, confirmAction, pickProjectFolder } from "../lib/api";
+import { api, confirmAction } from "../lib/api";
 import type { Workspace } from "../lib/types";
 import { Icon } from "./Icon";
 
@@ -13,7 +13,6 @@ export function AiConnections({
   onError: (error: unknown) => void;
 }) {
   const [name, setName] = useState("Codex");
-  const [projectRoots, setProjectRoots] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [credential, setCredential] = useState<{
     token: string;
@@ -77,9 +76,9 @@ export function AiConnections({
       <section className="settings-section">
         <h2>Connected client profiles</h2>
         <p>
-          Every valid token can read logs, run, stop, restart and edit commands
-          for all services, including services added later. Groups do not
-          restrict access.
+          Every valid token can create or open projects in any folder accessible
+          to this app, read logs, run, stop, restart and edit all services.
+          Existing tokens have the same full access.
         </p>
         {!workspace.ai.clients.length && (
           <p className="empty-inline">
@@ -92,14 +91,8 @@ export function AiConnections({
             <div>
               <strong>{client.name}</strong>
               <span>
-                All services · Read + control + edit commands
-                {client.projectRoots?.length
-                  ? ` · ${client.projectRoots.length} parent folders`
-                  : ""}
+                Full access · Create/open projects + control + edit commands
               </span>
-              {client.projectRoots?.map((root) => (
-                <span key={root}>{root}</span>
-              ))}
             </div>
             <button
               className="tiny danger-text"
@@ -125,7 +118,7 @@ export function AiConnections({
           e.preventDefault();
           void perform(async () =>
             setCredential(
-              await api.createClient(name, [], true, true, projectRoots),
+              await api.createClient(name, [], true, true),
             ),
           );
         }}
@@ -140,53 +133,10 @@ export function AiConnections({
             maxLength={80}
           />
         </label>
-        <fieldset className="project-grants">
-          <legend>Allow creation and opening inside folders</legend>
-          <p>
-            Optional: choose parent folders only if AI should create or open
-            folders that are not registered yet. Existing and future registered
-            services are already accessible with the token. Opening a folder
-            does not run commands.
-          </p>
-          {projectRoots.map((root) => (
-            <div className="settings-row" key={root}>
-              <code>{root}</code>
-              <button
-                type="button"
-                className="icon-button"
-                aria-label={`Remove allowed folder ${root}`}
-                disabled={busy}
-                onClick={() =>
-                  setProjectRoots((roots) => roots.filter((p) => p !== root))
-                }
-              >
-                <Icon name="close" size={14} />
-              </button>
-            </div>
-          ))}
-          <button
-            type="button"
-            className="secondary"
-            disabled={busy}
-            onClick={() => {
-              void perform(async () => {
-                const root = await pickProjectFolder(
-                  "Allow AI to create and open projects inside this folder",
-                );
-                if (typeof root === "string")
-                  setProjectRoots((roots) =>
-                    roots.includes(root) ? roots : [...roots, root],
-                  );
-              });
-            }}
-          >
-            <Icon name="folder" /> Add allowed folder
-          </button>
-        </fieldset>
         <p className="warning-banner">
-          This token can edit and execute commands with your user permissions
-          across the entire workspace. Share it only with clients you trust.
-          Existing tokens have the same access.
+          Full access: this token can create/open projects and edit/execute
+          commands anywhere your user account allows. No additional folder grants
+          are needed. macOS privacy permissions still apply. Keep this token private.
         </p>
         <button
           className="primary"
