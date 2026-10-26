@@ -381,7 +381,7 @@ fn vpn_worker_config(
 ) -> Value {
     serde_json::json!({"services":{"worker":{
         "image":image,"pull_policy":"never","restart":"no",
-        "entrypoint":["/bin/sh","-lc"],"command":[command],
+        "entrypoint":["/bin/sh","-c"],"command":[command],
         "working_dir":Path::new("/workspace").join(relative),
         "network_mode":format!("container:{gateway}"),
         "cap_drop":["ALL"],"security_opt":["no-new-privileges:true"],
@@ -501,6 +501,25 @@ mod tests {
         assert!(worker.get("ports").is_none());
         assert!(worker.get("devices").is_none());
         assert_eq!(worker["working_dir"], "/workspace/api");
+    }
+    #[tokio::test]
+    #[ignore = "requires local Docker and the already installed golang:1.26-bookworm image"]
+    async fn vpn_shell_keeps_runtime_image_tools_on_path() {
+        let config = vpn_worker_config(
+            Path::new("/project"), Path::new(""), "golang:1.26-bookworm",
+            "go version", "owner", "unused", Path::new("/private/resolver"),
+            serde_json::Map::new(),
+        );
+        let worker = &config["services"]["worker"];
+        let session = crate::docker::DockerSession::local().await.unwrap();
+        let mut command = session.command();
+        command.args(["run", "--rm", "--pull=never", "--network", "none", "--cap-drop=ALL",
+            "--security-opt=no-new-privileges:true", "--entrypoint", worker["entrypoint"][0].as_str().unwrap(),
+            worker["image"].as_str().unwrap(), worker["entrypoint"][1].as_str().unwrap(),
+            worker["command"][0].as_str().unwrap()]);
+        let output = capture(command).await.unwrap();
+        let version = String::from_utf8(output).unwrap();
+        assert!(version.starts_with("go version go") && version.contains("linux/"));
     }
     #[test]
     fn refuses_shared_resources_and_injects_ownership() {
