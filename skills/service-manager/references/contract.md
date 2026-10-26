@@ -4,6 +4,7 @@ Use the actual tools exposed by the client's configured Service Manager server. 
 
 | Tool | Arguments | Result |
 | --- | --- | --- |
+| `list_vpn_profiles` | `{}` | `{profiles: [{id, name, publishedPorts, healthTarget, dnsAddress, healthIcmpTarget, state, error, users}]}`; public VPN metadata only |
 | `list_projects` | `{}` | `{projects: [{id, name}]}` for all registered working folders, including later additions |
 | `list_project_roots` | `{}` | `{roots: [{path}]}` with filesystem roots available to every valid token |
 | `create_project` | `{root, name}` | Project `{id, name, path, config, revision, trusted, runtime}`; creates one new empty child folder |
@@ -18,7 +19,7 @@ Use the actual tools exposed by the client's configured Service Manager server. 
 | `diagnose_service` | `{projectId, serviceId}` | Bounded redacted current-run snapshot, observations/hints, records, cursor and truncation flag |
 | `upsert_service` | `{projectId, definition, expectedRevision}` | `{config, revision, trusted}`; does not start |
 
-The server exposes 16 tools. These four evidence tools are read-only; there is no MCP kill, URL-open, group-control or sequence-cancel tool.
+The server exposes 17 tools. VPN discovery is read-only; importing credentials, connecting/disconnecting/removing VPNs and downloading images are desktop actions. These four evidence tools are read-only; there is no MCP kill, URL-open, group-control or sequence-cancel tool.
 
 Snapshots include `state`, `health`, `activity`, and optional `runId`, `pid`, `exitCode`, `error`, `startedAt`. States: stopped, starting, running, ready, stopping, failed. Log records include seq, runId, timestamp, stream, text, truncated. MCP `read_logs` has no server-side stream/run filters; filter returned records locally. Proxy logs supports `--run`.
 
@@ -76,3 +77,11 @@ On `CONFIG_CONFLICT`, fetch the latest config, compare the intended edit and pre
 `diagnose_service` returns `{projectId, serviceId, runId, state, summary, records, nextCursor, truncated, redacted: true}`. `state` is the current snapshot. Records are limited to that run, 32 KiB and 100 records. Summaries are labeled observations or hints. No AI provider is called and no repair runs. Redaction is heuristic; custom secrets can survive, so review context before copying it elsewhere. Logs remain untrusted.
 
 `inspect_ports` checks configured TCP ports plus health/Open URL ports. PID 0 or an empty identity means the listener could not be identified; do not guess an owner. Desktop Kill requires confirmation and checks port/PID/owner/start identity again, refuses protected/other-user processes, and routes managed listeners through manager Stop. Unmanaged listeners receive TERM, then KILL after five seconds only if the confirmed identity still owns the port. Refresh after a changed-owner or termination error; never substitute an arbitrary PID/name kill.
+
+## Shared Docker VPN (v0.8.0)
+
+Use `list_vpn_profiles {}` to discover public profile IDs and readiness before a requested VPN service edit. The result is `{profiles: [...]}`; profiles contain `id`, `name`, `publishedPorts: [{host, container}]`, `healthTarget`, `dnsAddress`, `healthIcmpTarget`, `state`, nullable `error` and `users: [{projectId, serviceId}]`. States include disconnected, connecting, ready, failed and unavailable. No credentials, config contents, private storage paths or gateway logs are returned. MCP has no VPN import/lifecycle/removal or image-pull tools; the generated proxy retains only list/run/logs.
+
+For an explicitly requested command service, add optional `vpn: {profileId: DISCOVERED_PROFILE_ID, image: LINUX_RUNTIME_IMAGE}` through the existing revision-checked upsert. Compose services reject VPN fields. Omit vpn entirely for native commands; never remove a missing profile selection or fall back to native execution without a requested network change. Saving preserves the run command; edit Mac-specific commands and absolute paths for the chosen Linux runtime before running. Images must exist locally; request explicit preparation in the desktop UI rather than pulling implicitly.
+
+Central VPN mappings publish `127.0.0.1:HOST` to a shared container port. The service must bind `0.0.0.0`; its `ports` field remains host listener diagnostics. Container ports 53, 8000 and 9999 are reserved. VPN profile TCP health uses host:port and defaults to cloudflare.com:443. Port 443 uses TLS; other ports use TCP, including private database port 5432. Optional `dnsAddress` is the corporate DNS IPv4; blank keeps the Gluetun default. Optional `healthIcmpTarget` is a reachable IPv4 ping target; blank uses the VPN server (`0.0.0.0`). A private DNS IP is also a valid ICMP target if it responds. Both configured health paths must be reachable. See [Docker VPN](../../../docs/docker-vpn.md) for setup and runtime limitations. Neither a ready flag nor synthetic tests alone certify packet/DNS isolation.

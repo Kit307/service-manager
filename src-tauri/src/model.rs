@@ -43,6 +43,41 @@ pub enum ServiceKind {
     Compose { file: String },
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct VpnService {
+    pub profile_id: String,
+    pub image: String,
+}
+pub fn validate_vpn_image(image: &str) -> Result<()> {
+    if image.is_empty()
+        || image.len() > 256
+        || !image.as_bytes()[0].is_ascii_alphanumeric()
+        || !image
+            .bytes()
+            .all(|c| c.is_ascii_alphanumeric() || b"./:_-@".contains(&c))
+    {
+        return Err(AppError::new(
+            "CONFIG_INVALID",
+            "Use a valid locally available Docker image name without spaces or options.",
+        ));
+    }
+    Ok(())
+}
+fn validate_vpn(kind: &ServiceKind, vpn: &Option<VpnService>) -> Result<()> {
+    if let Some(vpn) = vpn {
+        if !matches!(kind, ServiceKind::Command { .. })
+            || uuid::Uuid::parse_str(&vpn.profile_id).is_err()
+        {
+            return Err(AppError::new(
+                "CONFIG_INVALID",
+                "VPN profiles are supported only for command services with a valid profile ID.",
+            ));
+        }
+        validate_vpn_image(&vpn.image)?;
+    }
+    Ok(())
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", try_from = "ServiceWire")]
 pub struct ServiceDefinition {
     pub id: String,
@@ -60,6 +95,8 @@ pub struct ServiceDefinition {
     pub url: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub depends_on: Vec<crate::project::ServiceRef>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub vpn: Option<VpnService>,
 }
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -78,6 +115,7 @@ struct ServiceWire {
     url: Option<String>,
     #[serde(default)]
     depends_on: Vec<crate::project::ServiceRef>,
+    vpn: Option<VpnService>,
 }
 impl TryFrom<ServiceWire> for ServiceDefinition {
     type Error = String;
@@ -87,6 +125,7 @@ impl TryFrom<ServiceWire> for ServiceDefinition {
             ("compose", None, Some(file)) => ServiceKind::Compose { file },
             _ => return Err("Choose command with command text, or compose with a file; unknown and mixed fields are not supported.".into()),
         };
+        validate_vpn(&kind, &w.vpn).map_err(|e| e.message)?;
         Ok(Self {
             id: w.id,
             name: w.name,
@@ -97,6 +136,7 @@ impl TryFrom<ServiceWire> for ServiceDefinition {
             ports: w.ports,
             url: w.url,
             depends_on: w.depends_on,
+            vpn: w.vpn,
         })
     }
 }
@@ -150,6 +190,7 @@ pub fn validate(root: &Path, config: &ProjectConfig) -> Result<()> {
     }
     let mut ids = std::collections::HashSet::new();
     for service in &config.services {
+        validate_vpn(&service.kind, &service.vpn)?;
         if service.id.is_empty()
             || service.id.len() > 80
             || !service

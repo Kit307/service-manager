@@ -339,6 +339,7 @@ struct Tools {
 }
 fn definitions() -> Vec<Tool> {
     let definitions = [
+        ("list_vpn_profiles", "Read shared Docker VPN profile IDs, health state, published ports and active service users. Credentials and OpenVPN contents are never returned. Configure or connect VPNs in the desktop app.", false, false),
         ("list_projects", "List every registered working folder, including folders added after this token was created.", false, false),
         ("list_project_roots", "List filesystem roots available to every valid token. Project creation/opening also accepts any existing absolute parent folder accessible to the app.", false, false),
         ("create_project", "Create one new empty project folder inside any accessible absolute parent folder and register it. Never overwrites files, initializes git, or starts commands.", false, false),
@@ -394,6 +395,10 @@ impl Tools {
                 .bridge
                 .register_project(client_id, root, relative, name == "create_project")
                 .await;
+        }
+        if name == "list_vpn_profiles" {
+            self.bridge.authorize(client_id).await?;
+            return Ok(json!({"profiles": self.bridge.manager.vpns.list().await?}));
         }
         if matches!(name, "list_projects" | "list_project_roots") {
             self.bridge.authorize(client_id).await?;
@@ -521,5 +526,38 @@ impl ServerHandler for Tools {
             Err(error) => CallToolResult::structured_error(json!(error)),
         }
         .into())
+    }
+}
+
+#[cfg(test)]
+mod vpn_tools_tests {
+    use super::*;
+
+    #[test]
+    fn vpn_discovery_is_read_only_and_exposes_no_mutation_tools() {
+        let tools = definitions();
+        let tool = tools.iter().find(|tool| tool.name == "list_vpn_profiles").unwrap();
+        let value = serde_json::to_value(tool).unwrap();
+        assert_eq!(value["annotations"]["readOnlyHint"], true);
+        assert_eq!(value["inputSchema"]["properties"], json!({}));
+        for name in ["import_vpn_profile", "connect_vpn", "disconnect_vpn", "remove_vpn_profile", "pull_container_image"] {
+            assert!(!tools.iter().any(|tool| tool.name == name));
+        }
+    }
+
+    #[tokio::test]
+    async fn vpn_discovery_requires_current_authorization_without_a_project_argument() {
+        let dir = tempfile::tempdir().unwrap();
+        let manager = Manager::new(dir.path().into()).unwrap();
+        let bridge = AiBridge::new(manager, dir.path().into(), 47831).unwrap();
+        bridge.clients.lock().await.push(ClientProfile {
+            id: "fixture".into(), name: "Fixture".into(), projects: vec![],
+            project_roots: vec![], control: false, edit: false,
+            token_hash: hash(b"synthetic-fixture"), limiter: limiter(),
+        });
+        let tools = Tools { bridge: bridge.clone() };
+        assert_eq!(tools.execute("fixture", "list_vpn_profiles", json!({})).await.unwrap(), json!({"profiles": []}));
+        bridge.revoke("fixture").await.unwrap();
+        assert_eq!(tools.execute("fixture", "list_vpn_profiles", json!({})).await.unwrap_err().code, "PERMISSION_DENIED");
     }
 }

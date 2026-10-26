@@ -3,6 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 import { ask, open } from "@tauri-apps/plugin-dialog";
 import type {
   AiStatus,
+  VpnImport, VpnProfile,
   LogPage,
   Project,
   ServiceDefinition,
@@ -36,7 +37,17 @@ export async function pickProjectFolder(title = "Open a code folder") {
     title,
   });
 }
+export async function pickVpnConfig() {
+  if (!isDesktop()) throw new Error("Open the desktop app to import an OpenVPN profile.");
+  return open({ multiple: false, directory: false, filters: [{ name: "OpenVPN", extensions: ["ovpn"] }] });
+}
 export const api = {
+  listVpnProfiles: (): Promise<VpnProfile[]> => invoke("list_vpn_profiles", {}),
+  importVpnProfile: (input: VpnImport): Promise<VpnProfile> => invoke("import_vpn_profile", { input }),
+  connectVpn: (id: string): Promise<VpnProfile> => invoke("connect_vpn", { id }),
+  disconnectVpn: (id: string): Promise<void> => invoke("disconnect_vpn", { id }),
+  removeVpnProfile: (id: string): Promise<void> => invoke("remove_vpn_profile", { id }),
+  pullContainerImage: (image: string): Promise<void> => invoke("pull_container_image", { image }),
   inspectPorts: (projectId: string, serviceId: string): Promise<PortListener[]> => invoke("inspect_ports", {projectId, serviceId}),
   killPort: (projectId: string, serviceId: string, listener: {port:number;pid:number;identity:string}): Promise<void> => invoke("kill_port", {projectId, serviceId, ...listener}),
   runHistory: (projectId:string, serviceId:string):Promise<RunSummary[]> => invoke("run_history", {projectId,serviceId}),

@@ -57,3 +57,7 @@ Buttons, cards and the tab bar use a raised clear-glass capsule treatment with v
 No React Liquid Glass library is added. The [rdev/liquid-glass-react README](https://github.com/rdev/liquid-glass-react) describes Safari's lack of displacement support; Tauri on macOS uses WKWebView. The native plugin owns the window effect while React supplies readable surfaces.
 
 The plugin uses private macOS APIs. A future OS update can change or break its effect, and this build makes no claim of App Store suitability. The shared native Clear helper was exercised on macOS 27.0.1 in an isolated WebKit fixture. Native tab movement and more than two panes were verified; the older-macOS fallback has not been run on an older system.
+
+## Shared Docker VPN
+
+Command services can opt into a shared Docker VPN profile and Linux runtime image. Configure/import profiles and shared loopback port mappings on the central Docker VPN page, then select one in service Settings. Image downloads require explicit preparation; VPN selection never rewrites the command or silently falls back to native execution. Compose and absent-vpn definitions keep their existing behavior. See [shared Docker VPN](docker-vpn.md) for setup, credentials/privacy, runtime requirements and verification limits.

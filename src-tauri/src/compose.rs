@@ -3,22 +3,18 @@ use crate::{
     project::{hash, secure_write},
 };
 use serde_json::Value;
-use std::{
-    path::{Path, PathBuf},
-    process::Stdio,
-    time::Duration,
-};
-use tokio::{io::AsyncReadExt, process::Command};
+use std::path::{Path, PathBuf};
+use tokio::process::Command;
 
 pub struct ComposeLaunch {
-    docker: PathBuf,
-    host: String,
+    session: crate::docker::DockerSession,
     pub name: String,
     owner: String,
     cwd: PathBuf,
     file: PathBuf,
     expected: Vec<String>,
     private_snapshot: bool,
+    private_files: Vec<PathBuf>,
 }
 
 pub struct ComposeJob {
@@ -36,35 +32,11 @@ fn failure(message: &str) -> AppError {
     AppError::new("COMPOSE_FAILED", message)
 }
 
-// Expanded configuration can contain credentials; never return Docker output in errors.
-async fn capture(mut command: Command) -> Result<Vec<u8>> {
-    command
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .process_group(0)
-        .kill_on_drop(true);
-    let mut child = command.spawn().map_err(|_| {
-        failure("Docker could not start. Install Docker and make its CLI available.")
-    })?;
-    let pid = child.id().unwrap();
-    let mut stdout = child.stdout.take().unwrap();
-    let result = tokio::time::timeout(Duration::from_secs(15), async {
-        let mut bytes = Vec::new();
-        (&mut stdout).take(1_048_577).read_to_end(&mut bytes).await?;
-        if bytes.len() > 1_048_576 { return Err(failure("Docker output exceeded the private preflight limit.")); }
-        if !child.wait().await?.success() { return Err(failure("Docker rejected the operation. Check the local daemon, Compose file and required local images.")); }
-        Ok(bytes)
-    }).await.unwrap_or_else(|_| Err(failure("Docker did not respond within 15 seconds.")));
-    // The CLI may launch a plugin; never leave preflight/helper descendants behind.
-    if nix::sys::signal::killpg(nix::unistd::Pid::from_raw(pid as i32), None).is_ok() {
-        let _ = nix::sys::signal::killpg(
-            nix::unistd::Pid::from_raw(pid as i32),
-            nix::sys::signal::Signal::SIGKILL,
-        );
-    }
-    let _ = child.wait().await;
-    result
+// Expanded configuration can contain credentials; never return Docker output.
+async fn capture(command: Command) -> Result<Vec<u8>> {
+    crate::docker::capture(command)
+        .await
+        .map_err(|e| failure(&e.message))
 }
 
 impl ComposeLaunch {
@@ -76,30 +48,7 @@ impl ComposeLaunch {
         project: &str,
         owner: &str,
     ) -> Result<Self> {
-        let docker = std::env::var_os("PATH")
-            .into_iter()
-            .flat_map(|p| std::env::split_paths(&p).collect::<Vec<_>>())
-            .map(|p| p.join("docker"))
-            .chain([
-                PathBuf::from("/opt/homebrew/bin/docker"),
-                PathBuf::from("/usr/local/bin/docker"),
-            ])
-            .find(|p| p.is_file())
-            .ok_or_else(|| failure("Install the Docker CLI before running Compose."))?;
-        let mut context = Command::new(&docker);
-        context.args([
-            "context",
-            "inspect",
-            "--format",
-            "{{.Endpoints.docker.Host}}",
-        ]);
-        let host = String::from_utf8(capture(context).await?)
-            .map_err(|_| failure("Invalid Docker context."))?
-            .trim()
-            .to_owned();
-        if !host.starts_with("unix:///") {
-            return Err(failure("Only a local Unix-socket Docker context is supported. Remote contexts are never controlled."));
-        }
+        let session = crate::docker::DockerSession::local().await?;
         let ServiceKind::Compose { file } = &definition.kind else {
             return Err(failure("A Compose definition is required."));
         };
@@ -109,14 +58,14 @@ impl ComposeLaunch {
         );
         let source = inside(root, file)?;
         let mut launch = Self {
-            docker,
-            host,
+            session,
             name,
             owner: owner.into(),
             cwd: cwd.into(),
             file: source,
             expected: Vec::new(),
             private_snapshot: false,
+            private_files: Vec::new(),
         };
         let mut config = launch.command();
         if let Some(file) = &definition.env_file {
@@ -183,13 +132,103 @@ impl ComposeLaunch {
         }
         Ok(launch)
     }
+    pub async fn prepare_vpn(
+        root: &Path,
+        cwd: &Path,
+        definition: &ServiceDefinition,
+        state: &Path,
+        project: &str,
+        owner: &str,
+        lease: &crate::vpn::VpnLease,
+    ) -> Result<Self> {
+        let vpn = definition
+            .vpn
+            .as_ref()
+            .ok_or_else(|| failure("VPN selection is required."))?;
+        crate::model::validate_vpn_image(&vpn.image)?;
+        let ServiceKind::Command { command } = &definition.kind else {
+            return Err(failure("VPN supports command services only."));
+        };
+        lease.session.verify().await?;
+        if !lease.healthy().await? {
+            return Err(failure("VPN gateway is not healthy."));
+        }
+        let mut inspect = lease.session.command();
+        inspect.args(["image", "inspect", "--format", "{{.Id}}", &vpn.image]);
+        let image = String::from_utf8(capture(inspect).await?)
+            .map_err(|_| failure("Invalid local container image."))?
+            .trim()
+            .to_owned();
+        if !image.starts_with("sha256:")
+            || image.len() != 71
+            || !image[7..].bytes().all(|b| b.is_ascii_hexdigit())
+        {
+            return Err(failure(
+                "Download this service image in VPN settings before Run.",
+            ));
+        }
+        let relative = cwd
+            .strip_prefix(root)
+            .map_err(|_| failure("Container cwd must remain inside the project."))?;
+        let name = format!(
+            "sm-{}",
+            &hash(format!("{project}/{}", definition.id).as_bytes())[..24]
+        );
+        let resolver = state.join(format!("vpn-resolver-{}", uuid::Uuid::new_v4()));
+        let mut launch = Self {
+            session: lease.session.clone(),
+            name,
+            owner: owner.into(),
+            cwd: cwd.into(),
+            file: state.join(format!("compose-{}.json", uuid::Uuid::new_v4())),
+            expected: vec!["worker".into()],
+            private_snapshot: true,
+            private_files: vec![resolver.clone()],
+        };
+        secure_write(
+            &resolver,
+            format!("nameserver {}\noptions ndots:0\n", lease.dns_address).as_bytes(),
+        )?;
+        let mut environment = serde_json::Map::new();
+        if let Some(file) = &definition.env_file {
+            let entries = dotenvy::from_path_iter(inside(root, file)?)
+                .map_err(|_| failure("Cannot read service env file."))?;
+            for entry in entries {
+                let (key, value) = entry.map_err(|_| failure("Invalid service env file."))?;
+                environment.insert(key, Value::String(value));
+            }
+        }
+        let mut value = vpn_worker_config(
+            root,
+            relative,
+            &image,
+            command,
+            owner,
+            &lease.gateway_id,
+            &resolver,
+            environment,
+        );
+        // Compose interpolation must never expand host secrets or alter literal service commands.
+        escape_compose_values(&mut value);
+        secure_write(
+            &launch.file,
+            &serde_json::to_vec(&value).map_err(|_| failure("Cannot save VPN worker snapshot."))?,
+        )?;
+        if launch.containers().await?.iter().any(|c| {
+            c["State"]["Running"] == true
+                || c["State"]["Restarting"] == true
+                || c["State"]["Paused"] == true
+        }) {
+            return Err(failure(
+                "Owned service containers are already active. Stop them before starting a VPN run.",
+            ));
+        }
+        launch.expected = vec!["worker".into()];
+        Ok(launch)
+    }
     fn docker(&self) -> Command {
-        let mut cmd = Command::new(&self.docker);
-        cmd.env_remove("DOCKER_CONTEXT")
-            .env_remove("DOCKER_HOST")
-            .arg("--host")
-            .arg(&self.host)
-            .current_dir(&self.cwd);
+        let mut cmd = self.session.command();
+        cmd.current_dir(&self.cwd);
         cmd
     }
     pub fn command(&self) -> Command {
@@ -211,6 +250,7 @@ impl ComposeLaunch {
         cmd
     }
     pub async fn containers(&self) -> Result<Vec<Value>> {
+        self.session.verify().await?;
         let mut ps = self.docker();
         ps.args([
             "ps",
@@ -320,9 +360,43 @@ impl ComposeLaunch {
 
 impl Drop for ComposeLaunch {
     fn drop(&mut self) {
+        for path in &self.private_files {
+            let _ = std::fs::remove_file(path);
+        }
         if self.private_snapshot {
             let _ = std::fs::remove_file(&self.file);
         }
+    }
+}
+
+fn vpn_worker_config(
+    root: &Path,
+    relative: &Path,
+    image: &str,
+    command: &str,
+    owner: &str,
+    gateway: &str,
+    resolver: &Path,
+    environment: serde_json::Map<String, Value>,
+) -> Value {
+    serde_json::json!({"services":{"worker":{
+        "image":image,"pull_policy":"never","restart":"no",
+        "entrypoint":["/bin/sh","-lc"],"command":[command],
+        "working_dir":Path::new("/workspace").join(relative),
+        "network_mode":format!("container:{gateway}"),
+        "cap_drop":["ALL"],"security_opt":["no-new-privileges:true"],
+        "labels":{"dev.service-manager.owner":owner},
+        "environment":environment,
+        "volumes":[{"type":"bind","source":root,"target":"/workspace"},
+            {"type":"bind","source":resolver,"target":"/etc/resolv.conf","read_only":true}]
+    }}})
+}
+fn escape_compose_values(value: &mut Value) {
+    match value {
+        Value::String(s) => *s = s.replace('$', "$$"),
+        Value::Array(values) => values.iter_mut().for_each(escape_compose_values),
+        Value::Object(values) => values.values_mut().for_each(escape_compose_values),
+        _ => {}
     }
 }
 
@@ -403,6 +477,31 @@ fn isolate(value: &mut Value, owner: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn vpn_worker_shares_only_verified_namespace_and_literal_command() {
+        let mut env = serde_json::Map::new();
+        env.insert("SECRET".into(), "$PRIVATE".into());
+        let mut config = vpn_worker_config(
+            Path::new("/project"),
+            Path::new("api"),
+            "sha256:test",
+            "echo $SECRET",
+            "owner",
+            "immutable-id",
+            Path::new("/private/resolver"),
+            env,
+        );
+        escape_compose_values(&mut config);
+        let worker = &config["services"]["worker"];
+        assert_eq!(worker["network_mode"], "container:immutable-id");
+        assert_eq!(worker["command"][0], "echo $$SECRET");
+        assert_eq!(worker["environment"]["SECRET"], "$$PRIVATE");
+        assert_eq!(worker["cap_drop"], serde_json::json!(["ALL"]));
+        assert_eq!(worker["volumes"][1]["read_only"], true);
+        assert!(worker.get("ports").is_none());
+        assert!(worker.get("devices").is_none());
+        assert_eq!(worker["working_dir"], "/workspace/api");
+    }
     #[test]
     fn refuses_shared_resources_and_injects_ownership() {
         let mut good = serde_json::json!({"name":"sm-test","services":{"web":{"image":"fixture"}},"volumes":{"data":{"name":"sm-test_data"}}});

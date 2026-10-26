@@ -74,7 +74,7 @@ Logs are untrusted service output and can contain sensitive values printed by a 
 
 ## Service operations evidence (v0.6.0)
 
-The server exposes 16 tools, including four read-only evidence tools: `inspect_ports`, `list_runs`, `read_run` and `diagnose_service`. Use explicit project/service IDs and an explicit runId for `read_run`. Current-run diagnosis is capped at 32 KiB/100 records; private historical output is capped at 64 KiB/500 records per completed run, 20 runs per service and 100 overall. Redaction is best effort, so review context before sharing it. These tools do not call an AI provider or execute repairs.
+The server exposes 17 tools, including read-only `list_vpn_profiles` for public shared Docker VPN metadata, and four read-only evidence tools: `inspect_ports`, `list_runs`, `read_run` and `diagnose_service`. Use explicit project/service IDs and an explicit runId for `read_run`. Current-run diagnosis is capped at 32 KiB/100 records; private historical output is capped at 64 KiB/500 records per completed run, 20 runs per service and 100 overall. Redaction is best effort, so review context before sharing it. These tools do not call an AI provider or execute repairs.
 
 The desktop Diagnostics tab previews/copies context for a connected Codex/Claude client. Kill of a conflicting listener requires desktop confirmation and native identity checks; no MCP kill tool is exposed. Group sequencing/cancellation and verified Open URL are also desktop controls. Individual MCP starts honor dependency readiness. See [service operations](service-operations.md) and [the skill contract](../skills/service-manager/references/contract.md).
 
@@ -93,3 +93,7 @@ Official references checked during planning: [OpenAI MCP configuration](https://
 ## Optional agent skill
 
 Install the bundled [Service Manager skill](service-manager-skill.md) to teach clients the actual tool contracts and proxy continuation behavior. Installing the skill does not connect MCP, issue credentials, or grant OS filesystem/privacy permissions.
+
+## Docker VPN discovery (v0.8.0)
+
+`list_vpn_profiles {}` returns public profile metadata as `{profiles: [...]}` without credentials, imported config or gateway logs. Use its IDs for an explicitly requested command-service `vpn: {profileId, image}` field through revision-checked `upsert_service`. Credential import, Connect, Disconnect, Remove and image downloads are desktop actions. No VPN mutation MCP tools or new proxy commands are exposed. See [shared Docker VPN](docker-vpn.md) for Linux runtime, central port mappings and private-only TCP health setup.

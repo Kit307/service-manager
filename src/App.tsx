@@ -21,6 +21,7 @@ import { ServiceOperations } from "./components/ServiceOperations";
 import { FailureAlerts } from "./components/FailureAlerts";
 import { LogPanel } from "./components/LogPanel";
 import { LogWorkspace } from "./components/LogWorkspace";
+import { VpnSettings } from "./components/VpnSettings";
 import { AiConnections } from "./components/AiConnections";
 
 import { ServiceSidebar } from "./components/ServiceSidebar";
@@ -52,7 +53,7 @@ export default function App() {
   const [projectId, setProjectId] = useState("");
   const [serviceId, setServiceId] = useState("");
   const [view, setView] = useState<
-    "workspace" | "group-settings" | "service" | "new" | "settings" | "ai" | "history" | "diagnostics" | "logs"
+    "workspace" | "group-settings" | "service" | "new" | "settings" | "ai" | "vpn" | "history" | "diagnostics" | "logs"
   >("workspace");
   const [logRequest, setLogRequest] = useState<{ ref: ServiceRef; id: number }>();
   const [focusedLog, setFocusedLog] = useState<ServiceRef>();
@@ -476,6 +477,7 @@ export default function App() {
           }}
         />
         <div className="sidebar-bottom">
+          <button className={`ai-nav ${view === "vpn" ? "selected" : ""}`} onClick={() => setView("vpn")}><Icon name="shield" />Docker VPN</button>
           <button
             className={`ai-nav ${view === "logs" ? "selected" : ""} ${logDropActive ? "drop-active" : ""}`}
             data-service-log-drop=""
@@ -559,11 +561,11 @@ export default function App() {
         <header className="workspace-bar">
           <div className="breadcrumb">
             <Icon
-              name={view === "logs" ? "terminal" : view === "ai" ? "ai" : group ? "group" : "grid"}
+              name={view === "vpn" ? "shield" : view === "logs" ? "terminal" : view === "ai" ? "ai" : group ? "group" : "grid"}
               size={14}
             />
             <span>
-              {view === "logs" ? "Log workspace" : view === "ai"
+              {view === "vpn" ? "Docker VPN" : view === "logs" ? "Log workspace" : view === "ai"
                 ? "AI Connections"
                 : (group?.name ?? "All services")}
             </span>
@@ -604,7 +606,9 @@ export default function App() {
           visible={view === "logs"}
           onSelect={setFocusedLog}
         />
-        {view === "logs" ? null : view === "ai" ? (
+        {view === "logs" ? null : view === "vpn" ? (
+          <VpnSettings profiles={workspace.vpns ?? []} projects={workspace.projects} onRefresh={refresh} />
+        ) : view === "ai" ? (
           <AiConnections
             workspace={workspace}
             onRefresh={refresh}
@@ -646,6 +650,7 @@ export default function App() {
               key={`new-${project.id}`}
               saving={busy}
               services={allServices}
+              vpnProfiles={workspace.vpns}
               projectId={project.id}
               onSave={(d) => {
                 void save(d);
@@ -816,6 +821,7 @@ export default function App() {
                     service={draft.definition}
                     saving={busy}
                     services={allServices}
+                    vpnProfiles={workspace.vpns}
                     projectId={project.id}
                     onSave={(d) => {
                       void save(d);

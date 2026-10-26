@@ -1,0 +1,13 @@
+.vpn-page .vpn-profile { padding: 18px 0; border-top: 1px solid var(--line); }
+.vpn-page .vpn-profile h3 { margin: 0; font-size: 14px; }
+.vpn-page .vpn-profile p { overflow-wrap: anywhere; }
+.vpn-import { display: grid; gap: 16px; }
+.vpn-import > .primary { justify-self: start; }
+.vpn-file { display: flex; align-items: center; justify-content: space-between; gap: 12px; overflow-wrap: anywhere; }
+.vpn-page .settings-row { flex-wrap: wrap; }
+.vpn-page .button-row { flex-wrap: wrap; }
+.service-form select { width: 100%; padding: 9px 12px; border: 1px solid var(--line); border-radius: 8px; color: var(--ink); background: var(--surface); }
+
+.vpn-options { display: grid; gap: 12px; margin-bottom: 24px; border: 1px solid var(--line); border-radius: 8px; padding: 16px; }
+.vpn-options > small { color: var(--muted); font-size: 11px; line-height: 1.6; }
+.vpn-options > button { justify-self: start; }

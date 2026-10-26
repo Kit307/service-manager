@@ -33,6 +33,10 @@ Use read-only `diagnose_service` for bounded, redacted current-run evidence (up 
 
 Optional `ports`, `url` and `dependsOn` definitions are documented in [the contract](references/contract.md). A prerequisite must be Ready before direct start; desktop group actions order selected services and can be cancelled. MCP exposes individual lifecycle actions, not group sequence/cancel. Do not invent those tools.
 
+## Shared Docker VPN (v0.8.0)
+
+Use read-only `list_vpn_profiles {}` to discover public profile IDs, health, published ports and active users. Importing credentials, connecting/disconnecting/removing profiles and downloading images are desktop actions; never invent MCP or proxy mutations for them. A requested command service can use optional `vpn: {profileId, image}` through revision-checked `upsert_service`. It runs in a Linux container, requires an explicitly prepared image and Linux-compatible command, and never falls back to a native host command. Compose does not support this field. Omit it for native services and preserve unavailable profile selections until the user requests a network change. Read [the contract](references/contract.md) before editing. Never request raw config, credentials or gateway logs for diagnostics.
+
 ## Proxy workflow
 
 The only subcommands are `list`, `run`, and `logs`; there is no proxy status/stop command. With RTK installed, a typical sequence is:

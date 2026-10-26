@@ -4,6 +4,7 @@ use crate::{
     mcp::AiBridge,
     model::*,
     project::{Project, ServiceRef, WorkspaceGroup},
+    vpn::{VpnImport, VpnProfileView},
 };
 use serde_json::{json, Value};
 use std::sync::{
@@ -38,19 +39,87 @@ pub fn apply_window_glass(window: &tauri::WebviewWindow) {
 pub struct DesktopState {
     pub manager: Manager,
     pub ai: AiBridge,
+    vpn_profiles: tokio::sync::Mutex<Vec<VpnProfileView>>,
     exiting: Arc<AtomicBool>,
     prompting: Arc<AtomicBool>,
 }
 #[tauri::command]
 async fn workspace(state: State<'_, DesktopState>) -> Result<Value> {
     let projects = state.manager.projects().await;
+    let vpns = state.vpn_profiles.lock().await.clone();
     let store = state.manager.store.lock().await;
     let groups = store.private.groups.clone();
     let unclean = store.unclean;
     drop(store);
     Ok(
-        json!({"projects":projects,"groups":groups,"ai":state.ai.status().await,"uncleanShutdown":unclean}),
+        json!({"projects":projects,"vpns":vpns,"groups":groups,"ai":state.ai.status().await,"uncleanShutdown":unclean}),
     )
+}
+async fn refresh_vpn_profiles(state: &DesktopState) -> Result<Vec<VpnProfileView>> {
+    let profiles = match tokio::time::timeout(std::time::Duration::from_secs(10), state.manager.vpns.list()).await {
+        Ok(result) => result?,
+        Err(_) => {
+            let mut cached = state.vpn_profiles.lock().await;
+            for profile in cached.iter_mut() {
+                profile.state = "unavailable".into();
+                profile.error = Some("VPN status timed out. Check the local Docker engine and refresh.".into());
+            }
+            return Err(AppError::new("VPN_UNAVAILABLE", "VPN status timed out. Check the local Docker engine and refresh."));
+        }
+    };
+    *state.vpn_profiles.lock().await = profiles.clone();
+    Ok(profiles)
+}
+fn allow_vpn_change(state: &DesktopState) -> Result<()> {
+    if state.exiting.load(Ordering::SeqCst) {
+        return Err(AppError::new("OPERATION_IN_PROGRESS", "The application is shutting down."));
+    }
+    Ok(())
+}
+#[tauri::command]
+async fn list_vpn_profiles(state: State<'_, DesktopState>) -> Result<Vec<VpnProfileView>> {
+    refresh_vpn_profiles(&state).await
+}
+#[tauri::command]
+async fn import_vpn_profile(state: State<'_, DesktopState>, input: VpnImport) -> Result<VpnProfileView> {
+    allow_vpn_change(&state)?;
+    let profile = state.manager.vpns.import(input).await?;
+    let mut cached = state.vpn_profiles.lock().await;
+    cached.retain(|entry| entry.id != profile.id);
+    cached.push(profile.clone());
+    Ok(profile)
+}
+#[tauri::command]
+async fn connect_vpn(state: State<'_, DesktopState>, id: String) -> Result<VpnProfileView> {
+    allow_vpn_change(&state)?;
+    let profile = state.manager.vpns.connect(&id).await?;
+    let mut cached = state.vpn_profiles.lock().await;
+    cached.retain(|entry| entry.id != id);
+    cached.push(profile.clone());
+    Ok(profile)
+}
+#[tauri::command]
+async fn disconnect_vpn(state: State<'_, DesktopState>, id: String) -> Result<()> {
+    allow_vpn_change(&state)?;
+    state.manager.vpns.disconnect(&id).await?;
+    if let Some(profile) = state.vpn_profiles.lock().await.iter_mut().find(|profile| profile.id == id) {
+        profile.state = "disconnected".into();
+        profile.error = None;
+        profile.users.clear();
+    }
+    Ok(())
+}
+#[tauri::command]
+async fn remove_vpn_profile(state: State<'_, DesktopState>, id: String) -> Result<()> {
+    allow_vpn_change(&state)?;
+    state.manager.vpns.remove(&id).await?;
+    state.vpn_profiles.lock().await.retain(|profile| profile.id != id);
+    Ok(())
+}
+#[tauri::command]
+async fn pull_container_image(state: State<'_, DesktopState>, image: String) -> Result<()> {
+    allow_vpn_change(&state)?;
+    crate::docker::pull_image(&image).await
 }
 #[tauri::command]
 async fn save_group(
@@ -351,8 +420,19 @@ pub fn run() {
             app.manage(DesktopState {
                 manager,
                 ai,
+                vpn_profiles: tokio::sync::Mutex::new(Vec::new()),
                 exiting: Arc::new(AtomicBool::new(false)),
                 prompting: Arc::new(AtomicBool::new(false)),
+            });
+            let vpn_handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                loop {
+                    let state = vpn_handle.state::<DesktopState>();
+                    if state.exiting.load(Ordering::SeqCst) { break; }
+                    // Docker inspection must never delay workspace or log publication.
+                    let _ = refresh_vpn_profiles(&state).await;
+                    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                }
             });
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
@@ -362,7 +442,9 @@ pub fn run() {
                 loop {
                     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
                     let state = handle.state::<DesktopState>();
-                    if ticks.is_multiple_of(20) { state.manager.projects().await; }
+                    if ticks.is_multiple_of(20) {
+                        state.manager.projects().await;
+                    }
                     ticks = ticks.wrapping_add(1);
                     let store = state.manager.store.lock().await;
                     let mut projects: Vec<_> = store.projects.values().cloned().collect();
@@ -370,7 +452,8 @@ pub fn run() {
                     let unclean = store.unclean;
                     let groups = store.private.groups.clone();
                     drop(store);
-                    let data = json!({"projects": projects, "groups": groups, "ai": state.ai.status().await, "uncleanShutdown": unclean});
+                    let vpns = state.vpn_profiles.lock().await.clone();
+                    let data = json!({"vpns": vpns, "projects": projects, "groups": groups, "ai": state.ai.status().await, "uncleanShutdown": unclean});
                     let revision = crate::project::hash(&serde_json::to_vec(&data).unwrap_or_default());
                     if revision != previous { let _ = handle.emit("workspace-changed", data); previous = revision; }
                     let seq = state.manager.logs.lock().await.revision();
@@ -408,6 +491,12 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             workspace,
+            list_vpn_profiles,
+            import_vpn_profile,
+            connect_vpn,
+            disconnect_vpn,
+            remove_vpn_profile,
+            pull_container_image,
             save_group,
             move_service,
             remove_group,

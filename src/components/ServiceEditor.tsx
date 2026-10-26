@@ -1,7 +1,9 @@
 import { useState } from "react";
-import type { ServiceDefinition } from "../lib/types";
+import type { ServiceDefinition, VpnProfile } from "../lib/types";
+import { api, errorMessage } from "../lib/api";
 import type { ServiceEntry } from "../lib/workspace";
 import "../styles/operations.css";
+import "../styles/vpn.css";
 import { Icon } from "./Icon";
 
 export function ServiceEditor({
@@ -12,8 +14,10 @@ export function ServiceEditor({
   onRemove,
   services,
   projectId,
+  vpnProfiles = [],
 }: {
   service?: ServiceDefinition;
+  vpnProfiles?: VpnProfile[];
   services?: ServiceEntry[];
   projectId?: string;
   saving: boolean;
@@ -21,6 +25,11 @@ export function ServiceEditor({
   onCancel: () => void;
   onRemove?: () => void;
 }) {
+  const [profileId, setProfileId] = useState(service?.type === "command" ? service.vpn?.profileId ?? "" : "");
+  const [image, setImage] = useState(service?.type === "command" ? service.vpn?.image ?? "" : "");
+  const [pulling, setPulling] = useState(false);
+  const [imageError, setImageError] = useState("");
+  const [imageStatus, setImageStatus] = useState("");
   const [name, setName] = useState(service?.name ?? "");
   const [id, setId] = useState(service?.id ?? "");
   const [type, setType] = useState(service?.type ?? "command");
@@ -76,7 +85,7 @@ export function ServiceEditor({
         };
         onSave(
           type === "command"
-            ? { ...common, type, command: command.trim() }
+            ? { ...common, type, command: command.trim(), ...(profileId ? { vpn: { profileId, image: image.trim() } } : {}) }
             : { ...common, type, file: file.trim() },
         );
       }}
@@ -155,7 +164,7 @@ export function ServiceEditor({
             onChange={(e) => setCommand(e.target.value)}
           />
           <small>
-            Runs with your login shell. Use foreground, noninteractive commands.
+            {profileId ? "Runs in a Linux container through the selected VPN. Edit host-specific absolute paths and commands for Linux." : "Runs with your login shell. Use foreground, noninteractive commands."}
           </small>
         </label>
       ) : (
@@ -173,6 +182,34 @@ export function ServiceEditor({
           </small>
         </label>
       )}
+      {type === "command" && <fieldset className="vpn-options">
+        <legend>Network</legend>
+        <label>VPN profile
+          <select value={profileId} onChange={(event) => {
+            setProfileId(event.target.value);
+            if (event.target.value && !image) setImage("node:22-bookworm-slim");
+          }}>
+            <option value="">None · Native on this Mac</option>
+            {profileId && !vpnProfiles.some((profile) => profile.id === profileId) && <option value={profileId} disabled>Unavailable profile ({profileId})</option>}
+            {vpnProfiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.name} · {profile.state}</option>)}
+          </select>
+        </label>
+        {profileId && <>
+          <label>Linux runtime image
+            <input required disabled={pulling} className="mono" value={image} placeholder="node:22-bookworm-slim" onChange={(event) => { setImage(event.target.value); setImageError(""); setImageStatus(""); }} />
+          </label>
+          <small>Use an image with your runtime, such as node:22-bookworm-slim or golang:1.24-bookworm. The working folder is mounted in Linux; Mac absolute paths do not work. Bind the service to 0.0.0.0. Configure published host ports on the VPN page; Ports below only inspect host listeners.</small>
+          <button type="button" className="secondary" disabled={pulling || !image.trim()} onClick={async () => {
+            setPulling(true); setImageError(""); setImageStatus("");
+            try { await api.pullContainerImage(image.trim()); setImageStatus("Runtime image is ready locally."); }
+            catch (error) { setImageError(errorMessage(error)); }
+            finally { setPulling(false); }
+          }}>{pulling ? "Downloading image…" : "Download runtime image"}</button>
+          <small>Images must exist locally before running. Downloads only start when you request them.</small>
+          {imageError && <small className="field-error" role="alert">{imageError}</small>}
+          {imageStatus && <small role="status">{imageStatus}</small>}
+        </>}
+      </fieldset>}
       <label>
         Working directory
         <input

@@ -17,6 +17,7 @@ async fn trusted_service_starts_once_and_collects_output() {
         ports: vec![],
         url: None,
         depends_on: vec![],
+        vpn: None,
     };
     store
         .save(
@@ -111,6 +112,7 @@ async fn shutdown_blocks_new_runs_and_escalates_a_process_that_ignores_sigterm()
         ports: vec![],
         url: None,
         depends_on: vec![],
+        vpn: None,
     };
     let saved = manager
         .save(&p.id, definition, "absent", false)
@@ -215,6 +217,7 @@ http.server.HTTPServer(("127.0.0.1", int(sys.argv[1])), Health).serve_forever()
         ports: vec![],
         url: None,
         depends_on: vec![],
+        vpn: None,
         health_check: Some(HealthCheck {
             url: format!("http://127.0.0.1:{port}/health"),
         }),

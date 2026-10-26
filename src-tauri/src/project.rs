@@ -133,6 +133,7 @@ pub fn read_config(root: &Path) -> Result<(ProjectConfig, String)> {
                         "ports",
                         "url",
                         "dependsOn",
+                        "vpn",
                     ]
                     .contains(&k.as_str())
                 })

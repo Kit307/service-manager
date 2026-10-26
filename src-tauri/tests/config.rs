@@ -13,6 +13,7 @@ fn command(cwd: &str) -> ServiceDefinition {
         ports: vec![],
         url: None,
         depends_on: vec![],
+        vpn: None,
     }
 }
 #[test]

@@ -16,6 +16,7 @@ async fn main() {
             command: "printf 'client-smoke-marker\\n'; sleep 300".into(),
         },
         env_file: None,
+        vpn: None,
         health_check: None,
         ports: vec![],
         url: None,

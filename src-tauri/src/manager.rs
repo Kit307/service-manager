@@ -25,6 +25,7 @@ use tokio::{
 pub struct Manager {
     pub store: Arc<Mutex<ProjectStore>>,
     pub logs: Arc<Mutex<LogStore>>,
+    pub vpns: crate::vpn::VpnManager,
     shutting_down: Arc<AtomicBool>,
     pub(crate) history: Arc<Mutex<crate::history::HistoryStore>>,
     pub(crate) sequence_lock: Arc<Mutex<()>>,
@@ -35,6 +36,7 @@ impl Manager {
         let store = ProjectStore::new(path.clone())?;
         let history = crate::history::HistoryStore::open(&path)?;
         Ok(Self {
+            vpns: crate::vpn::VpnManager::new(path)?,
             store: Arc::new(Mutex::new(store)),
             history: Arc::new(Mutex::new(history)),
             sequence_lock: Arc::new(Mutex::new(())),
@@ -66,6 +68,14 @@ impl Manager {
         revision: &str,
         trust: bool,
     ) -> Result<Project> {
+        if let Some(vpn) = &definition.vpn {
+            self.vpns
+                .ensure_service_ports(
+                    &vpn.profile_id,
+                    &crate::ports::configured_ports(&definition),
+                )
+                .await?;
+        }
         let mut store = self.store.lock().await;
         let mut p = store.refresh(project)?;
         if let Some(existing) = p.config.services.iter_mut().find(|s| s.id == definition.id) {
@@ -171,12 +181,22 @@ impl Manager {
                 ));
             }
         }
-        let conflicts = crate::ports::inspect(&crate::ports::configured_ports(&definition)).await?;
-        if let Some(conflict) = conflicts.first() {
-            return Err(AppError::new("PORT_IN_USE", format!("TCP port {} is used by {} (PID {}). Open Diagnostics to inspect or stop its owner.",conflict.port,conflict.name,conflict.pid)));
+        if let Some(vpn) = &definition.vpn {
+            self.vpns
+                .ensure_service_ports(
+                    &vpn.profile_id,
+                    &crate::ports::configured_ports(&definition),
+                )
+                .await?;
+        } else {
+            let conflicts =
+                crate::ports::inspect(&crate::ports::configured_ports(&definition)).await?;
+            if let Some(conflict) = conflicts.first() {
+                return Err(AppError::new("PORT_IN_USE", format!("TCP port {} is used by {} (PID {}). Open Diagnostics to inspect or stop its owner.",conflict.port,conflict.name,conflict.pid)));
+            }
         }
         let cwd = inside(Path::new(&p.path), &definition.cwd)?;
-        if matches!(definition.kind, ServiceKind::Compose { .. }) {
+        if matches!(definition.kind, ServiceKind::Compose { .. }) || definition.vpn.is_some() {
             let key = format!("{project}/{service}");
             let owner = store
                 .private
@@ -190,20 +210,17 @@ impl Manager {
                 state: "starting".into(),
                 started_at: Some(chrono::Utc::now().to_rfc3339()),
                 run_id: Some(uuid::Uuid::new_v4().to_string()),
-                activity: format!("Compose preflight via {actor}"),
+                activity: format!("Docker preflight via {actor}"),
                 ..Snapshot::default()
             };
             self.history.lock().await.begin(
                 project,
                 service,
                 snapshot.run_id.as_deref().unwrap(),
-                &format!(
-                    "docker compose -f {} up",
-                    match &definition.kind {
-                        ServiceKind::Compose { file } => file,
-                        _ => unreachable!(),
-                    }
-                ),
+                &match &definition.kind {
+                    ServiceKind::Compose { file } => format!("docker compose -f {file} up"),
+                    ServiceKind::Command { command } => command.clone(),
+                },
             )?;
             store
                 .projects
@@ -478,15 +495,52 @@ impl Manager {
     async fn run_compose_inner(&self, job: crate::compose::ComposeJob) -> Option<Snapshot> {
         use crate::compose::ComposeLaunch;
         let key = format!("{}/{}", job.project, job.service);
-        let prepared = ComposeLaunch::prepare(
-            &job.root,
-            &job.cwd,
-            &job.definition,
-            &job.state_dir,
-            &job.project,
-            &job.owner,
-        )
-        .await;
+        let mut lease = None;
+        let prepared = if let Some(vpn) = &job.definition.vpn {
+            let user = crate::project::ServiceRef {
+                project_id: job.project.clone(),
+                service_id: job.service.clone(),
+            };
+            let acquisition = self.vpns.acquire(&vpn.profile_id, &user, &job.run);
+            tokio::pin!(acquisition);
+            let acquired = loop {
+                tokio::select! {
+                    result=&mut acquisition => break result,
+                    _=tokio::time::sleep(Duration::from_millis(100)) => {
+                        let mut store=self.store.lock().await;
+                        let snapshot=store.projects.get_mut(&job.project)?.runtime.get_mut(&job.service)?;
+                        if snapshot.run_id.as_deref()!=Some(&job.run) {return None;}
+                        if snapshot.state=="stopping" {snapshot.state="stopped".into();return Some(snapshot.clone());}
+                    }
+                }
+            };
+            match acquired {
+                Ok(acquired) => {
+                    lease = Some(acquired);
+                    ComposeLaunch::prepare_vpn(
+                        &job.root,
+                        &job.cwd,
+                        &job.definition,
+                        &job.state_dir,
+                        &job.project,
+                        &job.owner,
+                        lease.as_ref().unwrap(),
+                    )
+                    .await
+                }
+                Err(error) => Err(error),
+            }
+        } else {
+            ComposeLaunch::prepare(
+                &job.root,
+                &job.cwd,
+                &job.definition,
+                &job.state_dir,
+                &job.project,
+                &job.owner,
+            )
+            .await
+        };
         let launch = match prepared {
             Ok(launch) => launch,
             Err(error) => {
@@ -505,6 +559,38 @@ impl Manager {
             }
         };
         // Stop may arrive while preflight is awaiting Docker.
+        {
+            let mut store = self.store.lock().await;
+            let snapshot = store
+                .projects
+                .get_mut(&job.project)?
+                .runtime
+                .get_mut(&job.service)?;
+            if snapshot.run_id.as_deref() != Some(&job.run) {
+                return None;
+            }
+            if snapshot.state == "stopping" {
+                snapshot.state = "stopped".into();
+                return Some(snapshot.clone());
+            }
+        }
+        if let Some(vpn) = lease.as_ref() {
+            if !vpn.healthy().await.unwrap_or(false) {
+                let mut store = self.store.lock().await;
+                let snapshot = store
+                    .projects
+                    .get_mut(&job.project)?
+                    .runtime
+                    .get_mut(&job.service)?;
+                if snapshot.run_id.as_deref() != Some(&job.run) {
+                    return None;
+                }
+                snapshot.state = "failed".into();
+                snapshot.error=Some("VPN health or ownership changed during worker preparation. No command was started.".into());
+                return Some(snapshot.clone());
+            }
+        }
+        // Health inspection can await Docker; honor Stop again before spawning its creator.
         {
             let mut store = self.store.lock().await;
             let snapshot = store
@@ -583,12 +669,35 @@ impl Manager {
         }
         let mut exited = false;
         let mut terminal = None;
+        let mut vpn_failure: Option<String> = None;
         loop {
-            let current = match self.status(&job.project, &job.service).await {
+            let mut current = match self.status(&job.project, &job.service).await {
                 Ok(s) if s.run_id.as_deref() == Some(&job.run) => s,
                 _ => break,
             };
             exited |= child.try_wait().ok().flatten().is_some();
+            if current.state != "stopping" {
+                if let Some(vpn) = lease.as_ref() {
+                    if !vpn.healthy().await.unwrap_or(false) {
+                        vpn_failure=Some("VPN health or ownership was lost. The worker was stopped; reconnect the profile before restarting.".into());
+                        if let Some(snapshot) = self
+                            .store
+                            .lock()
+                            .await
+                            .projects
+                            .get_mut(&job.project)
+                            .and_then(|p| p.runtime.get_mut(&job.service))
+                        {
+                            if snapshot.run_id.as_deref() != Some(&job.run) {
+                                break;
+                            }
+                            snapshot.state = "stopping".into();
+                            snapshot.error = vpn_failure.clone();
+                        }
+                        current.state = "stopping".into();
+                    }
+                }
+            }
             let stopping = current.state == "stopping";
             let result = if stopping {
                 // The Compose plugin is a child of Docker: reap and verify the whole creator group.
@@ -643,6 +752,36 @@ impl Manager {
                     }
                 })
             };
+            // A VPN worker releases its lease only after the creator group and all containers stop.
+            if lease.is_some()
+                && !stopping
+                && (result.as_ref().is_err()
+                    || result.as_ref().is_ok_and(|(state, _)| {
+                        *state == "failed"
+                            || *state == "stopped"
+                            || (*state == "starting" && exited && !group_alive(runner_pid))
+                    }))
+            {
+                vpn_failure=Some("The VPN worker exited or its Docker state could not be verified. Cleanup is required before restarting.".into());
+                if let Some(snapshot) = self
+                    .store
+                    .lock()
+                    .await
+                    .projects
+                    .get_mut(&job.project)
+                    .and_then(|p| p.runtime.get_mut(&job.service))
+                {
+                    if snapshot.run_id.as_deref() != Some(&job.run) {
+                        break;
+                    }
+                    snapshot.state = "stopping".into();
+                    snapshot.error = vpn_failure.clone();
+                }
+                continue;
+            }
+            if stopping && result.as_ref().is_ok_and(|(state, _)| *state == "stopped") {
+                drop(lease.take());
+            }
             let mut store = self.store.lock().await;
             if let Some(s) = store
                 .projects
@@ -675,6 +814,10 @@ impl Manager {
                             s.error = None;
                         }
                         if state == "stopped" {
+                            if let Some(message) = vpn_failure.as_ref() {
+                                s.state = "failed".into();
+                                s.error = Some(message.clone());
+                            }
                             terminal = Some(s.clone());
                             break;
                         }
@@ -847,6 +990,7 @@ impl Manager {
                 active |= self.status(p, s).await?.active();
             }
             if !active {
+                self.vpns.shutdown().await?;
                 let mut store = self.store.lock().await;
                 store.private.dirty = false;
                 return store.persist();
@@ -1032,6 +1176,7 @@ mod tests {
             ports: vec![],
             url: None,
             depends_on: vec![],
+            vpn: None,
         };
         manager
             .save(&project.id, definition, "absent", false)

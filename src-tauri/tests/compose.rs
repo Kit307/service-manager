@@ -67,6 +67,7 @@ async fn compose_owns_one_stack_and_stop_uses_the_launch_snapshot() {
             file: "compose.yaml".into(),
         },
         env_file: None,
+        vpn: None,
         health_check: None,
         ports: vec![],
         url: None,
