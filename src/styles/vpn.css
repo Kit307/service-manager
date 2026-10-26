@@ -11,3 +11,6 @@
 .vpn-options { display: grid; gap: 12px; margin-bottom: 24px; border: 1px solid var(--line); border-radius: 8px; padding: 16px; }
 .vpn-options > small { color: var(--muted); font-size: 11px; line-height: 1.6; }
 .vpn-options > button { justify-self: start; }
+
+.vpn-challenge { display: grid; gap: 12px; margin: 16px 0; padding: 16px; border: 1px solid var(--line); border-radius: 8px; }
+.vpn-challenge > button { justify-self: start; }

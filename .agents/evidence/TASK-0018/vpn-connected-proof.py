@@ -17,11 +17,16 @@ with tempfile.TemporaryDirectory(prefix='.sm-vpn-fixture-',dir=ROOT) as tmp:
  (p/'key-passphrase').write_text('synthetic-key-passphrase-only');(p/'key-passphrase').chmod(0o600)
  openssl('pkcs8','-topk8','-v2','aes-256-cbc','-in',str(p/'client.key'),'-out',str(p/'client.encrypted.key'),'-passout','file:'+str(p/'key-passphrase'))
  (p/'server.ovpn').write_text('port 1194\nproto udp\ndev tun\ntopology subnet\nserver 10.66.0.0 255.255.255.0\nca /fixture/ca.crt\ncert /fixture/server.crt\nkey /fixture/server.key\ndh none\nduplicate-cn\ndata-ciphers AES-256-GCM\nauth SHA256\nkeepalive 2 10\nverb 3\n')
+ mfa_case=len(sys.argv)>2 and sys.argv[2]=='vpn_manager_handles_real_crv1_mfa'
+ if mfa_case:
+  (p/'auth-mfa.sh').write_text('exec 3<"$1"\nIFS= read -r auth_user <&3\nIFS= read -r auth_secret <&3\nexec 3<&-\nif [ "$auth_user" = "synthetic-user" ] && [ "$auth_secret" = "synthetic-password" ]; then\n  printf %s "CRV1:R:synthetic-crv1-state:c3ludGhldGljLXVzZXI=:Enter synthetic MFA code" > "$auth_failed_reason_file"\n  exit 1\nfi\nif [ "$auth_user" = "synthetic-user" ] && [ "$auth_secret" = "CRV1::synthetic-crv1-state::424242" ]; then exit 0; fi\nexit 1\n')
+  (p/'server-mfa.ovpn').write_text((p/'server.ovpn').read_text().replace('port 1194','port 1195').replace('dev tun\n','dev tun1\n').replace('server 10.66.0.0','server 10.67.0.0')+'script-security 2\nauth-user-pass-verify "/bin/sh /fixture/auth-mfa.sh" via-file\n')
  (p/'username').write_text('synthetic-user');(p/'password').write_text('synthetic-password');(p/'resolver').write_text('nameserver 127.0.0.1\noptions ndots:0\n')
  for f in p.iterdir(): f.chmod(0o600)
  try:
   docker('network','create','--label','dev.service-manager.proof='+run,net)
   server_cmd='openvpn2.6 --config /fixture/server.ovpn & while true; do printf "HTTP/1.1 200 OK\\r\\nContent-Length: 12\\r\\nConnection: close\\r\\n\\r\\nsynthetic-ok" | nc -l -p 5432; done'
+  if mfa_case: server_cmd='openvpn2.6 --config /fixture/server-mfa.ovpn & '+server_cmd
   docker('run','-d','--name',server,'--network',net,'--label','dev.service-manager.proof='+run,'--cap-add=NET_ADMIN','--device=/dev/net/tun:/dev/net/tun','--mount',f'type=bind,source={p},target=/fixture,readonly','--entrypoint','/bin/sh','qmcgaw/gluetun:v3.41.0','-c',server_cmd)
   remote=json.loads(docker('inspect',server).stdout)[0]['NetworkSettings']['Networks'][net]['IPAddress']
   if len(sys.argv)>1: remote='synthetic-vpn-server'

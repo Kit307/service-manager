@@ -26,3 +26,6 @@ TASK-0018 implemented and verified with synthetic Docker VPNs. App/DMG 0.8.0 bui
 
 ## Authentication follow-up
 TASK-0019 adds certificate-only and encrypted-key authentication compatibility in 0.8.1, with synthetic regression proof before real profile setup.
+
+## Interactive challenge follow-up
+TASK-0020 implements separately approved dynamic CRV1 MFA/PIN support in 0.8.2 for independent simultaneous VPN profiles.

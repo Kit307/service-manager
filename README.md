@@ -15,7 +15,7 @@
 
 Run Go, Node.js, and Docker Compose services without repeatedly typing commands. Organize them into groups, compare live logs, and let Codex or Claude Code use the same service manager through authenticated MCP or a generated log proxy.
 
-**Current source version: 0.8.1.** Local development app built with **Tauri, Rust, React, and TypeScript**. macOS Apple Silicon is the verified desktop target; Windows builds are not yet verified. macOS builds are unsigned and not notarized. There are currently no published GitHub Release downloads.
+**Current source version: 0.8.2.** Local development app built with **Tauri, Rust, React, and TypeScript**. macOS Apple Silicon is the verified desktop target; Windows builds are not yet verified. macOS builds are unsigned and not notarized. There are currently no published GitHub Release downloads.
 
 ![Service Manager overview with grouped API, web, and worker services, lifecycle controls, and readiness states](docs/images/overview.png)
 

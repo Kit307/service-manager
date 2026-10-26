@@ -57,7 +57,7 @@ export type AiStatus = {
 };
 export type VpnPortMapping = { host: number; container: number };
 export type VpnImport = { name: string; configPath: string; username: string; password: string; keyPassphrase?: string; publishedPorts: VpnPortMapping[]; healthTarget: string; dnsAddress?: string; healthIcmpTarget?: string };
-export type VpnProfile = { id: string; name: string; publishedPorts: VpnPortMapping[]; healthTarget: string; dnsAddress?: string; healthIcmpTarget?: string; state: string; error?: string | null; users: ServiceRef[] };
+export type VpnProfile = { id: string; name: string; publishedPorts: VpnPortMapping[]; healthTarget: string; dnsAddress?: string; healthIcmpTarget?: string; state: string; authChallenge?: { id: string; prompt: string } | null; error?: string | null; users: ServiceRef[] };
 export type Workspace = {
   vpns?: VpnProfile[];
   projects: Project[];

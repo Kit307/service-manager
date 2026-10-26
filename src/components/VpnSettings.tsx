@@ -22,15 +22,23 @@ export function VpnSettings({ profiles, projects, onRefresh }: {
   const [dnsAddress, setDnsAddress] = useState("");
   const [healthIcmpTarget, setHealthIcmpTarget] = useState("");
   const [busy, setBusy] = useState(false);
+  const [profileBusy, setProfileBusy] = useState<Record<string, boolean>>({});
   const [error, setError] = useState("");
   const [formError, setFormError] = useState("");
   const [status, setStatus] = useState("");
 
   async function perform(action: () => Promise<unknown>) {
-    setBusy(true); setError(""); setStatus("");
+    setError(""); setStatus("");
     try { await action(); await onRefresh(); }
     catch (cause) { setError(errorMessage(cause)); }
-    finally { setBusy(false); }
+  }
+
+  async function performProfile(id: string, action: () => Promise<unknown>) {
+    setProfileBusy((current) => ({ ...current, [id]: true }));
+    setError(""); setStatus("");
+    try { await action(); await onRefresh(); }
+    catch (cause) { setError(errorMessage(cause)); }
+    finally { setProfileBusy((current) => ({ ...current, [id]: false })); }
   }
 
   async function importProfile() {
@@ -46,8 +54,8 @@ export function VpnSettings({ profiles, projects, onRefresh }: {
     if (publishedPorts.length > 32 || new Set(publishedPorts.map((port) => port.host)).size !== publishedPorts.length || new Set(publishedPorts.map((port) => port.container)).size !== publishedPorts.length) {
       setFormError("Use up to 32 unique host and container ports."); return;
     }
-    if (publishedPorts.some((port) => [53, 8000, 9999].includes(port.container))) {
-      setFormError("Container ports 53, 8000 and 9999 are reserved for VPN DNS, control and health."); return;
+    if (publishedPorts.some((port) => [53, 8000, 9999, 11940].includes(port.container))) {
+      setFormError("Container ports 53, 8000, 9999 and 11940 are reserved for VPN DNS, control, health and authentication."); return;
     }
     if (!name.trim() || !configPath || (authMode === "password" && (!username.trim() || !password))) {
       setFormError("Choose an .ovpn file and enter a name and the credentials required by the selected authentication method."); return;
@@ -83,7 +91,11 @@ export function VpnSettings({ profiles, projects, onRefresh }: {
     {status && <p role="status">{status}</p>}
     <section className="settings-section">
       <div className="settings-row"><div><h2>Prepare gateway image</h2><p>Download {gatewayImage} explicitly before connecting. Missing images are never downloaded during a run.</p></div>
-        <button className="secondary" disabled={busy} onClick={() => void perform(async () => { await api.pullContainerImage(gatewayImage); setStatus("Gateway image is ready locally."); })}>{busy ? "Working…" : "Download gateway image"}</button>
+        <button className="secondary" disabled={busy} onClick={async () => {
+          setBusy(true);
+          try { await perform(async () => { await api.pullContainerImage(gatewayImage); setStatus("Gateway image is ready locally."); }); }
+          finally { setBusy(false); }
+        }}>{busy ? "Working…" : "Download gateway image"}</button>
       </div>
     </section>
     <section className="settings-section">
@@ -91,24 +103,31 @@ export function VpnSettings({ profiles, projects, onRefresh }: {
       {!profiles.length && <p className="empty-inline">No VPN profiles yet. Import one below, then select it in a command service’s settings.</p>}
       {profiles.map((profile) => {
         const active = profile.users.length > 0;
+        const lifecycleBusy = busy || profileBusy[profile.id];
         const connected = ["ready"].includes(profile.state);
-        const transitioning = ["connecting"].includes(profile.state);
+        const transitioning = ["connecting", "authRequired"].includes(profile.state);
         return <article className="vpn-profile" key={profile.id} aria-label={profile.name}>
           <div className="settings-row"><div><h3>{profile.name}</h3><p>{profile.state} · TCP {profile.healthTarget}</p></div>
             <div className="button-row">
-              <button className="secondary" disabled={busy || connected || transitioning} onClick={async () => {
-                if (await confirmAction(`Connect “${profile.name}” in Docker? Selected services will use this tunnel.`, "Connect VPN?")) void perform(() => api.connectVpn(profile.id));
+              <button className="secondary" disabled={lifecycleBusy || connected || transitioning} onClick={async () => {
+                if (await confirmAction(`Connect “${profile.name}” in Docker? Selected services will use this tunnel.`, "Connect VPN?")) void performProfile(profile.id, () => api.connectVpn(profile.id));
               }}>Connect</button>
-              <button className="secondary" disabled={busy || active || transitioning || profile.state === "disconnected"} onClick={async () => {
-                if (await confirmAction(`Disconnect “${profile.name}”?`, "Disconnect VPN?")) void perform(() => api.disconnectVpn(profile.id));
+              <button className="secondary" disabled={lifecycleBusy || active || transitioning || profile.state === "disconnected"} onClick={async () => {
+                if (await confirmAction(`Disconnect “${profile.name}”?`, "Disconnect VPN?")) void performProfile(profile.id, () => api.disconnectVpn(profile.id));
               }}>Disconnect</button>
-              <button className="danger-text" disabled={busy || active || transitioning} onClick={async () => {
-                if (await confirmAction(`Remove “${profile.name}” and its private saved credentials?`, "Remove VPN profile?")) void perform(() => api.removeVpnProfile(profile.id));
+              <button className="danger-text" disabled={lifecycleBusy || active || transitioning} onClick={async () => {
+                if (await confirmAction(`Remove “${profile.name}” and its private saved credentials?`, "Remove VPN profile?")) void performProfile(profile.id, () => api.removeVpnProfile(profile.id));
               }}>Remove</button>
             </div>
           </div>
           <p>{profile.publishedPorts.length ? profile.publishedPorts.map((port) => `127.0.0.1:${port.host} → ${port.container}`).join(", ") : "No published host ports"}</p>
           <p>DNS: {profile.dnsAddress || "Gluetun default"} · ICMP health: {profile.healthIcmpTarget || "VPN server (0.0.0.0)"}</p>
+          {profile.state === "authRequired" && profile.authChallenge && <VpnChallenge
+            key={profile.authChallenge.id}
+            profileId={profile.id}
+            challenge={profile.authChallenge}
+            onRefresh={onRefresh}
+          />}
           {profile.error && <p className="runtime-error" role="alert">{profile.error}</p>}
           {active ? <><p>In use · Stop these services before disconnecting or removing.</p><ul>{profile.users.map((ref) => {
             const project = projects.find((candidate) => candidate.id === ref.projectId);
@@ -120,7 +139,7 @@ export function VpnSettings({ profiles, projects, onRefresh }: {
     </section>
     <form className="settings-section vpn-import" onSubmit={(event) => { event.preventDefault(); void importProfile(); }}>
       <h2>Import an OpenVPN profile</h2>
-      <p>Imported configuration, credentials and any private key passphrase are stored privately by the app, outside project files. The .ovpn must include inline certificates and keys. OTP and browser SSO are unsupported.</p>
+      <p>Imported configuration, credentials and any private key passphrase are stored privately by the app, outside project files. The .ovpn must include inline certificates and keys. Dynamic OpenVPN PIN challenges appear below the connecting profile. Browser SSO is unsupported.</p>
       <label>Profile name<input required maxLength={80} value={name} onChange={(event) => setName(event.target.value)} /></label>
       <div className="vpn-file"><span>{configPath ? configPath.split(/[\\/]/).pop() : "No .ovpn file selected"}</span><button type="button" className="secondary" disabled={busy} onClick={() => void perform(async () => {
         const path = await pickVpnConfig(); if (typeof path === "string") setConfigPath(path);
@@ -148,9 +167,61 @@ export function VpnSettings({ profiles, projects, onRefresh }: {
         <label>Corporate DNS IPv4 <span className="optional">optional</span><input className="mono" value={dnsAddress} placeholder="10.0.0.53" onChange={(event) => setDnsAddress(event.target.value)} /><small>Blank uses Gluetun’s default resolver. A private DNS IP is used directly by the gateway and workers for corporate hostnames.</small></label>
         <label>ICMP health target IPv4 <span className="optional">optional</span><input className="mono" value={healthIcmpTarget} placeholder="0.0.0.0" onChange={(event) => setHealthIcmpTarget(event.target.value)} /><small>Choose an IPv4 target reachable by ping through this VPN. The private DNS IP can work if it responds. Blank uses the VPN server (0.0.0.0).</small></label>
       </div>
-      <label>Published ports <span className="optional">optional</span><input className="mono" value={ports} placeholder="3000:3000, 8080:8080" onChange={(event) => setPorts(event.target.value)} /><small>HOST:CONTAINER, comma-separated. Host listeners bind only to 127.0.0.1; configure these shared mappings before connecting. Container ports 53, 8000 and 9999 are reserved.</small></label>
+      <label>Published ports <span className="optional">optional</span><input className="mono" value={ports} placeholder="3000:3000, 8080:8080" onChange={(event) => setPorts(event.target.value)} /><small>HOST:CONTAINER, comma-separated. Host listeners bind only to 127.0.0.1; configure these shared mappings before connecting. Container ports 53, 8000, 9999 and 11940 are reserved.</small></label>
       {formError && <p className="field-error" role="alert">{formError}</p>}
       <button className="primary" disabled={busy}>{busy ? "Working…" : "Import profile"}</button>
     </form>
   </div>;
+}
+
+function VpnChallenge({ profileId, challenge, onRefresh }: {
+  profileId: string;
+  challenge: { id: string; prompt: string };
+  onRefresh: () => Promise<unknown>;
+}) {
+  const [response, setResponse] = useState("");
+  const [sending, setSending] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
+  const [cancelled, setCancelled] = useState(false);
+  const [error, setError] = useState("");
+  return <form className="vpn-challenge" aria-label="VPN authentication challenge" onSubmit={async (event) => {
+    event.preventDefault();
+    if (!response || sending || submitted || cancelling || cancelled) return;
+    setSending(true); setError("");
+    try {
+      await api.respondVpnChallenge(profileId, challenge.id, response);
+      setResponse(""); setSubmitted(true);
+    } catch {
+      setResponse("");
+      setError("Could not send this response. Check whether the challenge is still active and enter the current PIN again.");
+      setSending(false); return;
+    }
+    // A refresh failure cannot turn an accepted one-time response into a retry.
+    try { await onRefresh(); } catch { /* Background workspace updates reconcile status. */ }
+    finally { setSending(false); }
+  }}>
+    <p>{challenge.prompt}</p>
+    <label>PIN / challenge response
+      <input aria-label="PIN / challenge response" type="password" autoComplete="off" spellCheck={false} required disabled={sending || submitted || cancelling || cancelled} value={response} onChange={(event) => setResponse(event.target.value)} />
+      <small>Sent once for this profile’s current challenge. Never saved with your VPN password.</small>
+    </label>
+    <div className="button-row">
+      <button className="primary" disabled={sending || submitted || cancelling || cancelled || !response}>{sending ? "Sending…" : submitted ? "Response sent" : "Send response"}</button>
+      <button type="button" className="secondary" disabled={sending || cancelling || cancelled} onClick={async () => {
+        setCancelling(true); setError(""); setResponse("");
+        try {
+          await api.disconnectVpn(profileId);
+          setCancelled(true);
+        } catch {
+          setError("Could not cancel authentication. Check the profile status and try again.");
+          setCancelling(false); return;
+        }
+        try { await onRefresh(); } catch { /* Background workspace updates reconcile status. */ }
+        finally { setCancelling(false); }
+      }}>{cancelling ? "Cancelling…" : "Cancel authentication"}</button>
+    </div>
+    {cancelled ? <p role="status">Authentication cancelled.</p> : submitted && <p role="status">Response accepted. Waiting for VPN authentication.</p>}
+    {error && <p className="field-error" role="alert">{error}</p>}
+  </form>;
 }

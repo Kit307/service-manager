@@ -58,3 +58,5 @@ MCP start/restart in v0.5.0 authorizes the current registered command; config/pa
 On v0.7.0, the token grants filesystem-wide project registration within OS permissions. Keep the requested folder explicit; creation/opening does not authorize running unrelated services. The root must be an existing absolute directory; relative traversal and out-of-root symlink targets remain rejected within each request. If `roots: []` is returned, an older server/profile is still active: update/reconnect the app instead of editing private permissions or bypassing the rejection.
 
 Report the explicit project/service, observed state/runId, relevant evidence, continuation cursor, and whether the service remains running. Never report a requested stop as complete while state is `stopping`.
+
+From v0.8.2, a profile waiting for dynamic CRV1 MFA shows `authRequired` and a safe `authChallenge`. The user answers in the desktop profile’s private PIN form; do not collect or submit PINs through chat/MCP. Other profiles can connect independently. Continue the existing service status/runId after the user completes authentication.

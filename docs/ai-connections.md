@@ -97,3 +97,7 @@ Install the bundled [Service Manager skill](service-manager-skill.md) to teach c
 ## Docker VPN discovery (v0.8.0)
 
 `list_vpn_profiles {}` returns public profile metadata as `{profiles: [...]}` without credentials, imported config or gateway logs. Use its IDs for an explicitly requested command-service `vpn: {profileId, image}` field through revision-checked `upsert_service`. Credential import, Connect, Disconnect, Remove and image downloads are desktop actions. No VPN mutation MCP tools or new proxy commands are exposed. See [shared Docker VPN](docker-vpn.md) for Linux runtime, central port mappings and private-only TCP health setup.
+
+### Interactive VPN authentication (v0.8.2)
+
+A read-only VPN profile can report `authRequired` and `authChallenge: {id, prompt}` while waiting for dynamic CRV1 MFA/PIN. The response is a desktop-only, one-shot private input. There is no credential/PIN MCP tool or new proxy subcommand; the tool count remains17. Keep the existing service run and ask the user to answer in the app instead of starting duplicate runs.

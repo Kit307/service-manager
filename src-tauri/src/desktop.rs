@@ -99,6 +99,13 @@ async fn connect_vpn(state: State<'_, DesktopState>, id: String) -> Result<VpnPr
     Ok(profile)
 }
 #[tauri::command]
+async fn respond_vpn_challenge(
+    state: State<'_, DesktopState>, id: String, challenge_id: String, response: String,
+) -> Result<()> {
+    allow_vpn_change(&state)?;
+    state.manager.vpns.respond_challenge(&id, &challenge_id, response).await
+}
+#[tauri::command]
 async fn disconnect_vpn(state: State<'_, DesktopState>, id: String) -> Result<()> {
     allow_vpn_change(&state)?;
     state.manager.vpns.disconnect(&id).await?;
@@ -494,6 +501,7 @@ pub fn run() {
             list_vpn_profiles,
             import_vpn_profile,
             connect_vpn,
+            respond_vpn_challenge,
             disconnect_vpn,
             remove_vpn_profile,
             pull_container_image,

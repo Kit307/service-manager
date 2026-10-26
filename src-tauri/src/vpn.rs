@@ -1,3 +1,5 @@
+#[path = "vpn_mfa.rs"]
+mod mfa;
 use crate::{
     docker::{capture, DockerSession},
     model::{AppError, Result},
@@ -59,6 +61,13 @@ pub struct VpnProfileView {
     pub state: String,
     pub error: Option<String>,
     pub users: Vec<ServiceRef>,
+    pub auth_challenge: Option<VpnChallengeView>,
+}
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VpnChallengeView {
+    pub id: String,
+    pub prompt: String,
 }
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -89,7 +98,8 @@ struct Inner {
     dir: PathBuf,
     owner: String,
     profiles: AsyncMutex<Vec<Profile>>,
-    operations: AsyncMutex<()>,
+    operations: Mutex<HashMap<String, Arc<AsyncMutex<()>>>>,
+    mfa: Mutex<HashMap<String, Arc<mfa::Bridge>>>,
     leases: Mutex<HashMap<String, HashMap<String, ServiceRef>>>,
 }
 #[derive(Clone)]
@@ -105,6 +115,26 @@ pub struct VpnLease {
     profile: String,
     token: String,
     fingerprint: String,
+}
+struct AuthenticationWait {
+    inner: Arc<Inner>,
+    profile: String,
+    complete: bool,
+}
+impl Drop for AuthenticationWait {
+    fn drop(&mut self) {
+        if !self.complete {
+            if let Some(bridge) = self
+                .inner
+                .mfa
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .get(&self.profile)
+            {
+                bridge.cancel();
+            }
+        }
+    }
 }
 fn error(message: &str) -> AppError {
     AppError::new("VPN_ERROR", message)
@@ -134,12 +164,12 @@ fn validate_ports(ports: &[VpnPortMapping]) -> Result<()> {
         || ports.iter().any(|p| {
             p.host == 0
                 || p.container == 0
-                || matches!(p.container, 53 | 8000 | 9999)
+                || matches!(p.container, 53 | 8000 | 9999 | mfa::PORT)
                 || !hosts.insert(p.host)
                 || !containers.insert(p.container)
         })
     {
-        return Err(error("Use up to 32 distinct nonzero host and container ports; container ports 53, 8000 and 9999 are reserved for VPN DNS, control and health."));
+        return Err(error("Use up to 32 distinct nonzero host and container ports; container ports 53, 8000, 9999 and 11940 are reserved for VPN DNS, control, health and authentication."));
     }
     Ok(())
 }
@@ -502,7 +532,8 @@ impl VpnManager {
                 dir,
                 owner,
                 profiles: AsyncMutex::new(profiles),
-                operations: AsyncMutex::new(()),
+                operations: Mutex::new(HashMap::new()),
+                mfa: Mutex::new(HashMap::new()),
                 leases: Mutex::new(HashMap::new()),
             }),
         })
@@ -525,7 +556,63 @@ impl VpnManager {
         }
         users
     }
+    async fn operation(&self, id: &str) -> tokio::sync::OwnedMutexGuard<()> {
+        let mutex = self
+            .inner
+            .operations
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .entry(id.into())
+            .or_insert_with(|| Arc::new(AsyncMutex::new(())))
+            .clone();
+        mutex.lock_owned().await
+    }
+    fn bridge(&self, id: &str) -> Option<Arc<mfa::Bridge>> {
+        self.inner
+            .mfa
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(id)
+            .cloned()
+    }
+    async fn clear_bridge(&self, id: &str) {
+        let bridge = self
+            .inner
+            .mfa
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(id);
+        if let Some(bridge) = bridge {
+            bridge.stop().await;
+        }
+    }
+    pub async fn respond_challenge(
+        &self,
+        id: &str,
+        challenge_id: &str,
+        response: String,
+    ) -> Result<()> {
+        let bridge = self.bridge(id).ok_or_else(|| {
+            error("This VPN challenge expired or belongs to another profile. Refresh the profile.")
+        })?;
+        bridge.session.verify().await?;
+        let snapshot = self.inner.profiles.lock().await.clone();
+        let profile = find(&snapshot, id)?;
+        let gateway = inspect(&bridge.session, &bridge.gateway_id).await?;
+        if !self.owns(&gateway, profile)
+            || gateway["Id"].as_str() != Some(&bridge.gateway_id)
+            || gateway["State"]["Running"].as_bool() != Some(true)
+        {
+            return Err(error(
+                "The VPN authentication gateway changed; the response was discarded.",
+            ));
+        }
+        bridge.respond(challenge_id, response)
+    }
     fn view(&self, p: &Profile, state: &str, message: Option<String>) -> VpnProfileView {
+        let bridge = self.bridge(&p.id);
+        let auth_challenge = bridge.as_ref().and_then(|bridge| bridge.challenge());
+        let failure = bridge.as_ref().and_then(|bridge| bridge.failure());
         VpnProfileView {
             id: p.id.clone(),
             name: p.name.clone(),
@@ -534,9 +621,16 @@ impl VpnManager {
             dns_address: p.dns_address.clone(),
             health_icmp_target: ipv4_target(&p.health_icmp_target, false)
                 .unwrap_or_else(|_| "0.0.0.0".into()),
-            state: state.into(),
-            error: message,
+            state: if auth_challenge.is_some() {
+                "authRequired".into()
+            } else if failure.is_some() {
+                "failed".into()
+            } else {
+                state.into()
+            },
+            error: failure.or(message),
             users: self.users(&p.id),
+            auth_challenge,
         }
     }
     pub(crate) async fn ensure_service_ports(&self, id: &str, ports: &[u16]) -> Result<()> {
@@ -661,7 +755,7 @@ impl VpnManager {
         Ok(views)
     }
     pub async fn connect(&self, id: &str) -> Result<VpnProfileView> {
-        let _operation = self.inner.operations.lock().await;
+        let _operation = self.operation(id).await;
         let profiles = self.inner.profiles.lock().await.clone();
         let p = find(&profiles, id)?;
         let session = DockerSession::pinned(&self.inner.dir).await?;
@@ -669,7 +763,7 @@ impl VpnManager {
         Ok(self.view(p, "ready", None))
     }
     pub async fn acquire(&self, id: &str, user: &ServiceRef, run_id: &str) -> Result<VpnLease> {
-        let _operation = self.inner.operations.lock().await;
+        let _operation = self.operation(id).await;
         let profiles = self.inner.profiles.lock().await.clone();
         let p = find(&profiles, id)?;
         let session = DockerSession::pinned(&self.inner.dir).await?;
@@ -699,16 +793,25 @@ impl VpnManager {
         })
     }
     pub async fn disconnect(&self, id: &str) -> Result<()> {
-        let _operation = self.inner.operations.lock().await;
+        if self.users(id).is_empty() {
+            if let Some(bridge) = self.bridge(id) {
+                bridge.cancel();
+            }
+        }
+        let _operation = self.operation(id).await;
         let profiles = self.inner.profiles.lock().await.clone();
         self.stop(find(&profiles, id)?).await
     }
     pub async fn remove(&self, id: &str) -> Result<()> {
-        let _operation = self.inner.operations.lock().await;
+        if self.users(id).is_empty() {
+            if let Some(bridge) = self.bridge(id) {
+                bridge.cancel();
+            }
+        }
+        let _operation = self.operation(id).await;
         let snapshot = self.inner.profiles.lock().await.clone();
         self.stop(find(&snapshot, id)?).await?;
-        let mut profiles = self.inner.profiles.lock().await;
-        let p = find(&profiles, id)?;
+        let p = find(&snapshot, id)?;
         let session = DockerSession::pinned(&self.inner.dir).await?;
         session.verify().await?;
         if let Some(v) = self.gateway(&session, p).await? {
@@ -747,6 +850,7 @@ impl VpnManager {
             cmd.args(["network", "rm", network_id]);
             capture(cmd).await?;
         }
+        let mut profiles = self.inner.profiles.lock().await;
         let next: Vec<_> = profiles.iter().filter(|p| p.id != id).cloned().collect();
         self.persist(&next)?;
         *profiles = next;
@@ -754,10 +858,23 @@ impl VpnManager {
         Ok(())
     }
     pub async fn shutdown(&self) -> Result<()> {
-        let _operation = self.inner.operations.lock().await;
+        let bridges: Vec<_> = self
+            .inner
+            .mfa
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .iter()
+            .map(|(id, bridge)| (id.clone(), bridge.clone()))
+            .collect();
+        for (id, bridge) in bridges {
+            if self.users(&id).is_empty() {
+                bridge.cancel();
+            }
+        }
         let profiles = self.inner.profiles.lock().await.clone();
         let mut failure = None;
         for p in profiles.iter() {
+            let _operation = self.operation(&p.id).await;
             if let Err(e) = self.stop(p).await {
                 failure = Some(e);
             }
@@ -798,6 +915,42 @@ impl VpnManager {
         }
         Ok(Some(v))
     }
+    async fn start_bridge(
+        &self,
+        session: &DockerSession,
+        p: &Profile,
+        gateway: &str,
+    ) -> Result<()> {
+        let dir = self.inner.dir.join(&p.id);
+        let secret = |name: &str| -> Result<String> {
+            let bytes = read_private(&dir.join(name))?;
+            let value = String::from_utf8(bytes)
+                .map_err(|_| error("The private VPN authentication settings are invalid."))?;
+            if value.is_empty() || value.len() > 4096 || value.chars().any(char::is_control) {
+                return Err(error(
+                    "The private VPN authentication settings are invalid.",
+                ));
+            }
+            Ok(value)
+        };
+        let secrets = mfa::Secrets {
+            management: secret("management-password")?,
+            username: secret("username")?,
+            password: secret("password")?,
+            key_passphrase: if p.has_key_passphrase {
+                Some(secret("key-passphrase")?)
+            } else {
+                None
+            },
+        };
+        let bridge = mfa::Bridge::spawn(session.clone(), gateway.into(), secrets);
+        self.inner
+            .mfa
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(p.id.clone(), bridge);
+        Ok(())
+    }
     async fn ensure(&self, s: &DockerSession, p: &Profile) -> Result<String> {
         s.verify().await?;
         if let Some(v) = self.gateway(s, p).await? {
@@ -805,13 +958,51 @@ impl VpnManager {
                 .as_str()
                 .ok_or_else(|| error("Gateway identity is missing."))?
                 .to_owned();
-            if !v["State"]["Running"].as_bool().unwrap_or(false) {
-                let mut cmd = s.command();
-                cmd.args(["start", &id]);
-                capture(cmd).await?;
+            let running = v["State"]["Running"].as_bool().unwrap_or(false);
+            if p.requires_credentials
+                && v["Config"]["Labels"][mfa::MANAGEMENT_LABEL].as_str()
+                    != Some(mfa::MANAGEMENT_VERSION)
+            {
+                if running {
+                    return Err(error("Disconnect this older username/password gateway before reconnecting to enable MFA. Its services were preserved."));
+                }
+                self.stop(p).await?;
+                let mut command = s.command();
+                command.args(["container", "rm", &id]);
+                capture(command).await?;
+            } else {
+                if p.requires_credentials
+                    && self
+                        .bridge(&p.id)
+                        .is_some_and(|bridge| bridge.failure().is_some())
+                {
+                    self.stop(p).await?;
+                }
+                if p.requires_credentials
+                    && container_state(&v) != "ready"
+                    && self.bridge(&p.id).is_none()
+                    && running
+                {
+                    self.stop(p).await?;
+                }
+                let running = inspect(s, &id).await?["State"]["Running"]
+                    .as_bool()
+                    .unwrap_or(false);
+                if !running {
+                    self.clear_bridge(&p.id).await;
+                    let mut command = s.command();
+                    command.args(["start", &id]);
+                    capture(command).await?;
+                }
+                if p.requires_credentials
+                    && self.bridge(&p.id).is_none()
+                    && container_state(&inspect(s, &id).await?) != "ready"
+                {
+                    self.start_bridge(s, p, &id).await?;
+                }
+                self.wait_healthy(s, &id, p).await?;
+                return Ok(id);
             }
-            self.wait_healthy(s, &id, p).await?;
-            return Ok(id);
         }
         let mut image = s.command();
         image.args(["image", "inspect", IMAGE]);
@@ -907,8 +1098,31 @@ impl VpnManager {
             "--label",
             &format!("{FINGERPRINT}={}", p.fingerprint),
         ]);
+        if p.requires_credentials {
+            let password_file = dir.join("management-password");
+            if !password_file.exists() {
+                secure_write(
+                    &password_file,
+                    format!(
+                        "{}{}",
+                        uuid::Uuid::new_v4().simple(),
+                        uuid::Uuid::new_v4().simple()
+                    )
+                    .as_bytes(),
+                )?;
+            }
+            read_private(&password_file)?;
+            cmd.arg("--label").arg(format!(
+                "{}={}",
+                mfa::MANAGEMENT_LABEL,
+                mfa::MANAGEMENT_VERSION
+            ));
+            cmd.arg("--env").arg(format!("OPENVPN_FLAGS=--management 127.0.0.1 {} {} --management-query-passwords --management-hold --auth-retry interact --auth-user-pass",mfa::PORT,mfa::PASSWORD_PATH));
+            cmd.arg("--env").arg("HEALTH_RESTART_VPN=off");
+        }
         let mut mounts = vec![("gateway.ovpn", "/gluetun/custom.conf")];
         if p.requires_credentials {
+            mounts.push(("management-password", mfa::PASSWORD_PATH));
             mounts.extend([
                 ("username", "/run/secrets/vpn_username"),
                 ("password", "/run/secrets/vpn_password"),
@@ -987,18 +1201,40 @@ impl VpnManager {
         let mut cmd = s.command();
         cmd.args(["start", &id]);
         capture(cmd).await?;
+        if p.requires_credentials {
+            self.start_bridge(s, p, &id).await?;
+        }
         self.wait_healthy(s, &id, p).await?;
         Ok(id)
     }
     async fn wait_healthy(&self, s: &DockerSession, id: &str, p: &Profile) -> Result<()> {
-        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(90);
+        let mut attempt = AuthenticationWait {
+            inner: self.inner.clone(),
+            profile: p.id.clone(),
+            complete: false,
+        };
+        let mut deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(90);
         loop {
+            if let Some(bridge) = self.bridge(&p.id) {
+                if bridge.gateway_id != id {
+                    return Err(error("The VPN authentication gateway identity changed."));
+                }
+                if let Some(message) = bridge.failure() {
+                    return Err(error(&message));
+                }
+                if bridge.challenge().is_some() {
+                    deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(90);
+                    tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+                    continue;
+                }
+            }
             s.verify().await?;
             let v = inspect(s, id).await?;
             if !self.owns(&v, p) {
                 return Err(error("VPN gateway ownership changed."));
             }
             if container_state(&v) == "ready" {
+                attempt.complete = true;
                 return Ok(());
             }
             if !v["State"]["Running"].as_bool().unwrap_or(false)
@@ -1018,6 +1254,7 @@ impl VpnManager {
         let s = DockerSession::pinned(&self.inner.dir).await?;
         s.verify().await?;
         let Some(v) = self.gateway(&s, p).await? else {
+            self.clear_bridge(&p.id).await;
             return Ok(());
         };
         let id = v["Id"]
@@ -1037,6 +1274,7 @@ impl VpnManager {
         if !self.owns(&current, p) {
             return Err(error("VPN gateway ownership changed; it was preserved."));
         }
+        self.clear_bridge(&p.id).await;
         let mut cmd = s.command();
         cmd.args(["stop", "--time", "10", id]);
         capture(cmd).await?;
@@ -1108,6 +1346,16 @@ fn container_state(v: &Value) -> &'static str {
 }
 impl VpnLease {
     pub async fn healthy(&self) -> Result<bool> {
+        if self
+            .inner
+            .mfa
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(&self.profile)
+            .is_some_and(|bridge| bridge.challenge().is_some() || bridge.failure().is_some())
+        {
+            return Ok(false);
+        }
         self.session.verify().await?;
         let v = inspect(&self.session, &self.gateway_id).await?;
         let l = &v["Config"]["Labels"];
@@ -1136,6 +1384,32 @@ impl Drop for VpnLease {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[tokio::test]
+    async fn profile_operations_are_independent_but_same_profile_remains_serialized() {
+        let temp = tempfile::tempdir().unwrap();
+        let manager = VpnManager::new(temp.path().into()).unwrap();
+        let profile_a = manager.operation("profile-a").await;
+        let profile_b = tokio::time::timeout(
+            std::time::Duration::from_millis(50),
+            manager.operation("profile-b"),
+        )
+        .await
+        .expect("another profile must not wait for MFA");
+        assert!(tokio::time::timeout(
+            std::time::Duration::from_millis(20),
+            manager.operation("profile-a")
+        )
+        .await
+        .is_err());
+        drop(profile_a);
+        let _same_profile = tokio::time::timeout(
+            std::time::Duration::from_millis(50),
+            manager.operation("profile-a"),
+        )
+        .await
+        .unwrap();
+        drop(profile_b);
+    }
     #[tokio::test]
     async fn remote_normalization_preserves_imported_lines_and_inline_material() {
         let original=b"client\r\n  remote localhost 1194 udp # fixture\r\n<ca>\r\nremote untouched.example 443\r\n</ca>\r\nremote 192.0.2.1 443 tcp\r\n";

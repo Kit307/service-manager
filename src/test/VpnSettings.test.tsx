@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, expect, it, vi } from "vitest";
 import { api, confirmAction, pickVpnConfig } from "../lib/api";
@@ -9,7 +9,7 @@ import type { ServiceDefinition, VpnProfile } from "../lib/types";
 vi.mock("../lib/api", async (original) => ({
   ...await original<typeof import("../lib/api")>(),
   confirmAction: vi.fn(), pickVpnConfig: vi.fn(),
-  api: { importVpnProfile: vi.fn(), connectVpn: vi.fn(), disconnectVpn: vi.fn(), removeVpnProfile: vi.fn(), listVpnProfiles: vi.fn(), pullContainerImage: vi.fn() },
+  api: { respondVpnChallenge: vi.fn(), importVpnProfile: vi.fn(), connectVpn: vi.fn(), disconnectVpn: vi.fn(), removeVpnProfile: vi.fn(), listVpnProfiles: vi.fn(), pullContainerImage: vi.fn() },
 }));
 const profile: VpnProfile = { id: "fixture-vpn", name: "Fixture VPN", healthTarget: "cloudflare.com:443", publishedPorts: [{ host: 3000, container: 8080 }], state: "ready", users: [] };
 const service: ServiceDefinition = { id: "fixture", name: "Fixture", type: "command", command: "npm start", cwd: "." };
@@ -38,6 +38,10 @@ it("validates ports and private TLS endpoint before importing, then clears crede
   await userEvent.clear(ports); await userEvent.type(ports, "3000:53");
   await userEvent.click(screen.getByRole("button", { name: "Import profile" }));
   expect(screen.getByRole("alert")).toHaveTextContent("reserved");
+  expect(api.importVpnProfile).not.toHaveBeenCalled();
+  await userEvent.clear(ports); await userEvent.type(ports, "3000:11940");
+  await userEvent.click(screen.getByRole("button", { name: "Import profile" }));
+  expect(screen.getByRole("alert")).toHaveTextContent("11940");
   expect(api.importVpnProfile).not.toHaveBeenCalled();
   await userEvent.clear(ports); await userEvent.type(ports, "3000:8080");
   const health = screen.getByLabelText(/TCP health endpoint/);
@@ -199,4 +203,121 @@ it("supports a separate encrypted-key passphrase with username/password authenti
   await userEvent.type(screen.getByLabelText(/Private key passphrase/), "synthetic-separate-passphrase");
   await userEvent.click(screen.getByRole("button", { name: "Import profile" }));
   await waitFor(() => expect(api.importVpnProfile).toHaveBeenCalledWith(expect.objectContaining({ username: "synthetic-user", password: "synthetic-password", keyPassphrase: "synthetic-separate-passphrase" })));
+});
+
+it("answers a profile challenge while Connect waits without affecting a healthy independent profile", async () => {
+  let finishConnect!: (profile: VpnProfile) => void;
+  vi.mocked(api.connectVpn).mockReturnValue(new Promise((resolve) => { finishConnect = resolve; }));
+  const refresh = vi.fn().mockRejectedValue(new Error("Metadata refresh unavailable"));
+  const other = { ...profile, id: "certificate-fixture", name: "Certificate fixture", state: "ready" };
+  const view = render(<VpnSettings profiles={[{ ...profile, state: "disconnected" }, other]} projects={[]} onRefresh={refresh} />);
+  const pendingProfile = within(screen.getByRole("article", { name: "Fixture VPN" }));
+  await userEvent.click(pendingProfile.getByRole("button", { name: "Connect" }));
+  await waitFor(() => expect(api.connectVpn).toHaveBeenCalledWith(profile.id));
+  view.rerender(<VpnSettings profiles={[{ ...profile, state: "authRequired", authChallenge: { id: "challenge-a", prompt: "Enter the current PIN" } }, other]} projects={[]} onRefresh={refresh} />);
+  const pin = pendingProfile.getByLabelText("PIN / challenge response");
+  expect(pin).toHaveAttribute("type", "password");
+  expect(pin).toBeEnabled();
+  await userEvent.type(pin, "synthetic-current-pin");
+  const send = pendingProfile.getByRole("button", { name: "Send response" });
+  expect(send).toBeEnabled();
+  await userEvent.click(send);
+  await waitFor(() => expect(api.respondVpnChallenge).toHaveBeenCalledWith(profile.id, "challenge-a", "synthetic-current-pin"));
+  expect(pin).toHaveValue("");
+  expect(pendingProfile.getByRole("status")).toHaveTextContent("Response accepted");
+  expect(pendingProfile.getByRole("button", { name: "Response sent" })).toBeDisabled();
+  expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  expect(api.connectVpn).toHaveBeenCalledTimes(1);
+  expect(api.disconnectVpn).not.toHaveBeenCalled();
+  expect(api.importVpnProfile).not.toHaveBeenCalled();
+  expect(within(screen.getByRole("article", { name: "Certificate fixture" })).queryByLabelText("PIN / challenge response")).not.toBeInTheDocument();
+  await act(async () => finishConnect(profile));
+});
+it("discards an unsent response when the challenge changes or disappears", async () => {
+  const challenged = { ...profile, state: "authRequired", authChallenge: { id: "challenge-a", prompt: "Enter a PIN" } };
+  const view = render(<VpnSettings profiles={[challenged]} projects={[]} onRefresh={vi.fn()} />);
+  await userEvent.type(screen.getByLabelText("PIN / challenge response"), "synthetic-old-pin");
+  view.rerender(<VpnSettings profiles={[{ ...challenged, authChallenge: { id: "challenge-b", prompt: "Enter the next PIN" } }]} projects={[]} onRefresh={vi.fn()} />);
+  expect(screen.getByLabelText("PIN / challenge response")).toHaveValue("");
+  expect(screen.getByText("Enter the next PIN")).toBeVisible();
+  await userEvent.type(screen.getByLabelText("PIN / challenge response"), "synthetic-new-pin");
+  view.rerender(<VpnSettings profiles={[{ ...challenged, state: "ready", authChallenge: null }]} projects={[]} onRefresh={vi.fn()} />);
+  expect(screen.queryByLabelText("PIN / challenge response")).not.toBeInTheDocument();
+  view.rerender(<VpnSettings profiles={[challenged]} projects={[]} onRefresh={vi.fn()} />);
+  expect(screen.getByLabelText("PIN / challenge response")).toHaveValue("");
+  expect(api.respondVpnChallenge).not.toHaveBeenCalled();
+});
+it("clears rejected responses and never reflects private response errors", async () => {
+  vi.mocked(api.respondVpnChallenge).mockRejectedValue(new Error("synthetic-rejected-pin"));
+  const write = vi.spyOn(Storage.prototype, "setItem");
+  render(<VpnSettings profiles={[{ ...profile, state: "authRequired", authChallenge: { id: "challenge-a", prompt: "Current PIN" } }]} projects={[]} onRefresh={vi.fn()} />);
+  await userEvent.type(screen.getByLabelText("PIN / challenge response"), "synthetic-rejected-pin");
+  await userEvent.click(screen.getByRole("button", { name: "Send response" }));
+  expect(await screen.findByRole("alert")).not.toHaveTextContent("synthetic-rejected-pin");
+  expect(screen.getByLabelText("PIN / challenge response")).toHaveValue("");
+  expect(write).not.toHaveBeenCalled();
+  write.mockRestore();
+});
+
+it("cancels pending authentication while Connect waits and leaves another healthy profile alone", async () => {
+  let finishConnect!: (profile: VpnProfile) => void;
+  vi.mocked(api.connectVpn).mockReturnValue(new Promise((resolve) => { finishConnect = resolve; }));
+  const refresh = vi.fn().mockRejectedValue(new Error("Metadata refresh unavailable"));
+  const other = { ...profile, id: "certificate-fixture", name: "Certificate fixture", state: "ready" };
+  const view = render(<VpnSettings profiles={[{ ...profile, state: "disconnected" }, other]} projects={[]} onRefresh={refresh} />);
+  const pending = within(screen.getByRole("article", { name: "Fixture VPN" }));
+  await userEvent.click(pending.getByRole("button", { name: "Connect" }));
+  await waitFor(() => expect(api.connectVpn).toHaveBeenCalledWith(profile.id));
+  view.rerender(<VpnSettings profiles={[{ ...profile, state: "authRequired", authChallenge: { id: "challenge-a", prompt: "Enter PIN" } }, other]} projects={[]} onRefresh={refresh} />);
+  await userEvent.type(pending.getByLabelText("PIN / challenge response"), "synthetic-unsent-pin");
+  const cancel = pending.getByRole("button", { name: "Cancel authentication" });
+  expect(cancel).toBeEnabled();
+  await userEvent.click(cancel);
+  await waitFor(() => expect(api.disconnectVpn).toHaveBeenCalledWith(profile.id));
+  expect(api.disconnectVpn).toHaveBeenCalledTimes(1);
+  expect(api.respondVpnChallenge).not.toHaveBeenCalled();
+  expect(pending.getByLabelText("PIN / challenge response")).toHaveValue("");
+  expect(pending.getByRole("status")).toHaveTextContent("Authentication cancelled");
+  expect(pending.getByRole("button", { name: "Cancel authentication" })).toBeDisabled();
+  expect(pending.getByRole("button", { name: "Send response" })).toBeDisabled();
+  expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  expect(api.removeVpnProfile).not.toHaveBeenCalled();
+  await act(async () => finishConnect(profile));
+});
+it("one profile’s pending PIN submission does not disable another profile’s challenge", async () => {
+  let finishResponse!: () => void;
+  vi.mocked(api.respondVpnChallenge).mockReturnValueOnce(new Promise((resolve) => { finishResponse = resolve; }));
+  const first = { ...profile, state: "authRequired", authChallenge: { id: "challenge-a", prompt: "First PIN" } };
+  const second = { ...first, id: "second-fixture", name: "Second fixture", authChallenge: { id: "challenge-b", prompt: "Second PIN" } };
+  render(<VpnSettings profiles={[first, second]} projects={[]} onRefresh={vi.fn()} />);
+  const firstPanel = within(screen.getByRole("article", { name: "Fixture VPN" }));
+  const secondPanel = within(screen.getByRole("article", { name: "Second fixture" }));
+  await userEvent.type(firstPanel.getByLabelText("PIN / challenge response"), "synthetic-first-pin");
+  await userEvent.click(firstPanel.getByRole("button", { name: "Send response" }));
+  expect(firstPanel.getByLabelText("PIN / challenge response")).toBeDisabled();
+  expect(secondPanel.getByLabelText("PIN / challenge response")).toBeEnabled();
+  expect(secondPanel.getByRole("button", { name: "Cancel authentication" })).toBeEnabled();
+  await userEvent.type(secondPanel.getByLabelText("PIN / challenge response"), "synthetic-second-pin");
+  expect(secondPanel.getByRole("button", { name: "Send response" })).toBeEnabled();
+  await act(async () => finishResponse());
+});
+
+it("can connect a second independent profile while the first waits for its PIN", async () => {
+  const finish: Record<string, (value: VpnProfile) => void> = {};
+  vi.mocked(api.connectVpn).mockImplementation((id) => new Promise((resolve) => { finish[id] = resolve; }));
+  const first = { ...profile, state: "disconnected" };
+  const second = { ...first, id: "second-fixture", name: "Second fixture" };
+  const refresh = vi.fn();
+  const view = render(<VpnSettings profiles={[first, second]} projects={[]} onRefresh={refresh} />);
+  await userEvent.click(within(screen.getByRole("article", { name: "Fixture VPN" })).getByRole("button", { name: "Connect" }));
+  await waitFor(() => expect(api.connectVpn).toHaveBeenCalledWith(first.id));
+  view.rerender(<VpnSettings profiles={[{ ...first, state: "authRequired", authChallenge: { id: "challenge-a", prompt: "First PIN" } }, second]} projects={[]} onRefresh={refresh} />);
+  const secondConnect = within(screen.getByRole("article", { name: "Second fixture" })).getByRole("button", { name: "Connect" });
+  expect(secondConnect).toBeEnabled();
+  await userEvent.click(secondConnect);
+  await waitFor(() => expect(api.connectVpn).toHaveBeenCalledWith(second.id));
+  expect(api.connectVpn).toHaveBeenCalledTimes(2);
+  expect(screen.getByLabelText("PIN / challenge response")).toBeEnabled();
+  expect(api.disconnectVpn).not.toHaveBeenCalled();
+  await act(async () => { finish[first.id](profile); finish[second.id]({ ...second, state: "ready" }); });
 });

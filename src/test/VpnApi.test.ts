@@ -10,11 +10,13 @@ it("uses native VPN command names and public payload contracts", async () => {
   await api.listVpnProfiles();
   await api.importVpnProfile(input);
   await api.connectVpn("fixture");
+  await api.respondVpnChallenge("fixture", "challenge-fixture", "synthetic-pin");
   await api.disconnectVpn("fixture");
   await api.removeVpnProfile("fixture");
   await api.pullContainerImage("qmcgaw/gluetun:v3.41.0");
   expect(vi.mocked(invoke).mock.calls).toEqual([
     ["list_vpn_profiles", {}], ["import_vpn_profile", { input }], ["connect_vpn", { id: "fixture" }],
+    ["respond_vpn_challenge", { id: "fixture", challengeId: "challenge-fixture", response: "synthetic-pin" }],
     ["disconnect_vpn", { id: "fixture" }], ["remove_vpn_profile", { id: "fixture" }],
     ["pull_container_image", { image: "qmcgaw/gluetun:v3.41.0" }],
   ]);

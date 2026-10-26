@@ -64,3 +64,27 @@ Verified:
 No real user profile, private key, passphrase, organization VPN or account was read or connected. Real profile compatibility remains a separate activation check.
 
 The existing username/password sharing/lifecycle regression also passed on 0.8.1: 1 test, 47.48 seconds, using the already compiled test binary.
+
+## Actual CRV1 MFA proof (0.8.2)
+
+Repeatable command: `rtk proxy /Users/krit/.cargo/bin/cargo test --manifest-path src-tauri/Cargo.toml --no-default-features --test vpn_docker vpn_manager_handles_real_crv1_mfa -- --ignored --nocapture`.
+
+Final sequential runtime result: PASS, 1 test, 34.72 seconds including fixture orchestration, run through the already compiled integration binary. The existing username/password sharing/lifecycle regression also passed against 0.8.2 (214.43 seconds while another fixture and the release build were active).
+
+This is a real OpenVPN protocol fixture, not a simulated management socket. A second isolated OpenVPN server listens on container-only UDP port 1195 and requires the fixture's username/password through auth-user-pass-verify via-file. It writes `CRV1:R:<state>:<base64-user>:<prompt>` into auth_failed_reason_file and rejects the first exchange. It then accepts only `CRV1::<state>::<synthetic-PIN>` on the next authentication exchange. The original server on container-only UDP port 1194 continues to require a valid client certificate. No server ports are published to the host.
+
+Verified:
+
+- A disconnected MFA profile reaches authRequired and exposes only an application-generated challenge ID plus a fixed safe prompt. Raw server state, username/password and PIN are absent from public challenge metadata.
+- While the first profile waits for a PIN, another previously disconnected certificate VPN and its managed worker start successfully. Profile operations are independent.
+- A second MFA profile independently reaches its own challenge. A challenge ID from the first profile is rejected against the second profile.
+- Cancelling the second pending MFA profile completes within the test's 10-second bound, before the PIN deadline; its waiting connect operation terminates and its old challenge ID is rejected.
+- Stale IDs and repeated use of a consumed challenge ID are rejected. The correct synthetic PIN completes the first profile's real OpenVPN authentication, and its managed worker reaches 10.67.0.1:5432.
+- The PIN and saved password values are absent from Docker process configuration. The PIN is absent from captured Docker gateway logs. The unrelated certificate worker remains reachable.
+- Manager.shutdown completes, followed by exact fixture cleanup.
+
+An earlier run with two Docker fixtures executing concurrently encountered an existing bounded Docker-operation timeout during final shutdown; all MFA functional assertions had passed. The final sequential rerun completed shutdown successfully in 34.72 seconds. The exact timed-out Docker operation was not identified, and no production timeout guard was widened. Run these Docker integration fixtures sequentially for reproducible proof.
+
+Protocol references: https://github.com/OpenVPN/openvpn/blob/release/2.6/doc/management-notes.txt (dynamic challenge/response), https://github.com/OpenVPN/openvpn/blob/release/2.6/doc/man-sections/script-options.rst (auth_failed_reason_file), and https://github.com/OpenVPN/openvpn/blob/release/2.6/src/openvpn/ssl_verify.c (synchronous auth-script reason handling).
+
+No real profile, account, organization VPN, private key or OTP was accessed. Static SCRV1, browser SSO and actual provider-specific MFA behavior remain outside this proof.

@@ -45,6 +45,7 @@ export const api = {
   listVpnProfiles: (): Promise<VpnProfile[]> => invoke("list_vpn_profiles", {}),
   importVpnProfile: (input: VpnImport): Promise<VpnProfile> => invoke("import_vpn_profile", { input }),
   connectVpn: (id: string): Promise<VpnProfile> => invoke("connect_vpn", { id }),
+  respondVpnChallenge: (id: string, challengeId: string, response: string): Promise<void> => invoke("respond_vpn_challenge", { id, challengeId, response }),
   disconnectVpn: (id: string): Promise<void> => invoke("disconnect_vpn", { id }),
   removeVpnProfile: (id: string): Promise<void> => invoke("remove_vpn_profile", { id }),
   pullContainerImage: (image: string): Promise<void> => invoke("pull_container_image", { image }),
