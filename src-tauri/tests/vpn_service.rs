@@ -66,6 +66,7 @@ async fn save_requires_profile_mappings_and_reloads_vpn_definition() {
         .import(VpnImport {
             name: "Fixture".into(),
             config_path: config.to_string_lossy().into(),
+            key_passphrase: String::new(),
             username: "fixture".into(),
             password: "synthetic-only".into(),
             published_ports: vec![service_manager::vpn::VpnPortMapping {

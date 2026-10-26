@@ -43,3 +43,24 @@ Verified:
 The fixture needs preinstalled Gluetun/Alpine images, local Docker and OpenSSL. It generates temporary certificates and dummy credentials. It precreates correctly owned private bridges with synthetic server IPs solely to avoid publishing test server ports; production gateway adoption and labels are still verified.
 
 Limitations: the induced failure is a stopped gateway, not a measured blackholed UDP tunnel. Real corporate authentication, DNS, packet-loss timing and ICMP policies remain untested. The fixture found that Gluetun custom provider accepts only IP-address remote endpoints. The source now normalizes hostname remotes to IPv4 in a private runtime copy before new gateway creation; bounded resolver/parser tests cover this policy.
+
+## Encrypted certificate-only authentication proof (0.8.1)
+
+Command: `rtk proxy /Users/krit/.cargo/bin/cargo test --manifest-path src-tauri/Cargo.toml --no-default-features --test vpn_docker vpn_manager_uses_certificate_only_encrypted_key -- --ignored --nocapture`.
+
+Result: PASS, 1 test, 111.11 seconds. Most time is the bounded wrong-passphrase connection failure: Gluetun retries until the manager's 90-second connection limit.
+
+The fixture generates a temporary CA, server/client certificates and an AES-encrypted PKCS8 client private key. OpenSSL receives the synthetic passphrase through a mode-0600 file, not a command argument. The certificate-only profile omits auth-user-pass and passes empty username/password. The synthetic server requires a valid CA-signed client certificate.
+
+Verified:
+
+- Correct private key passphrase establishes the VPN and the managed command worker reaches 10.66.0.1:5432.
+- Certificate-only profiles create no username/password files or application credential mounts. Docker's image has inherited default secret-file environment paths; these are paths, not credential values, and are not evidence of application username/password use.
+- Public profile metadata excludes the private-key payload and passphrase. Docker Config/Env/Cmd contain no synthetic username, password or key passphrase values.
+- OPENVPN_KEY_PASSPHRASE_SECRETFILE points to the private read-only secret mount; the actual passphrase value is absent from Docker's process configuration.
+- Wrong key passphrase returns a generic error without exposing either passphrase and leaves the already ready profile working.
+- Shutdown and fixture cleanup complete.
+
+No real user profile, private key, passphrase, organization VPN or account was read or connected. Real profile compatibility remains a separate activation check.
+
+The existing username/password sharing/lifecycle regression also passed on 0.8.1: 1 test, 47.48 seconds, using the already compiled test binary.

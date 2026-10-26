@@ -30,8 +30,12 @@ pub struct VpnPortMapping {
 pub struct VpnImport {
     pub name: String,
     pub config_path: String,
+    #[serde(default)]
     pub username: String,
+    #[serde(default)]
     pub password: String,
+    #[serde(default)]
+    pub key_passphrase: String,
     #[serde(default)]
     pub published_ports: Vec<VpnPortMapping>,
     #[serde(default)]
@@ -68,6 +72,18 @@ struct Profile {
     #[serde(default)]
     health_icmp_target: String,
     fingerprint: String,
+    #[serde(default = "default_true")]
+    requires_credentials: bool,
+    #[serde(default)]
+    has_key_passphrase: bool,
+}
+fn default_true() -> bool {
+    true
+}
+#[derive(Default)]
+struct ConfigAuth {
+    requires_credentials: bool,
+    encrypted_key: bool,
 }
 struct Inner {
     dir: PathBuf,
@@ -231,7 +247,7 @@ fn remote_host(line: &str) -> Result<Option<(usize, usize, &str)>> {
     let start = option_start + option.len() + tail.len() - tail.trim_start().len();
     Ok(Some((start, start + host.len(), host)))
 }
-async fn runtime_config(original: &[u8]) -> Result<Vec<u8>> {
+async fn runtime_config(original: &[u8], askpass: bool) -> Result<Vec<u8>> {
     validate_config(original)?;
     let text = std::str::from_utf8(original)
         .map_err(|_| error("The private OpenVPN configuration is invalid."))?;
@@ -277,28 +293,37 @@ async fn runtime_config(original: &[u8]) -> Result<Vec<u8>> {
             result.push_str(line);
         }
     }
+    if askpass {
+        if !result.ends_with('\n') {
+            result.push('\n');
+        }
+        result.push_str("askpass /etc/openvpn/askpass\n");
+    }
     Ok(result.into_bytes())
 }
-fn validate_config(bytes: &[u8]) -> Result<()> {
+fn validate_config(bytes: &[u8]) -> Result<ConfigAuth> {
     let text = std::str::from_utf8(bytes)
         .map_err(|_| error("Import a UTF-8 inline-certificate OpenVPN configuration."))?;
-    if bytes.len() > 1_048_576
-        || text.contains('\0')
-        || text.contains("ENCRYPTED PRIVATE KEY")
-        || text.contains("Proc-Type: 4,ENCRYPTED")
-    {
+    if bytes.len() > 1_048_576 || text.contains('\0') {
         return Err(error(
-            "Configurations over 1 MiB, encrypted keys and OTP authentication are unsupported.",
+            "Configurations over 1 MiB and OTP authentication are unsupported.",
         ));
     }
     let mut block: Option<&str> = None;
     let mut remotes = 0;
+    let mut auth = ConfigAuth::default();
     for line in text.lines() {
         let line = line.trim();
         if line.is_empty() || line.starts_with('#') || line.starts_with(';') {
             continue;
         }
         if let Some(tag) = block {
+            if tag == "key"
+                && (line.contains("ENCRYPTED PRIVATE KEY")
+                    || line.contains("Proc-Type: 4,ENCRYPTED"))
+            {
+                auth.encrypted_key = true;
+            }
             if line == format!("</{tag}>") {
                 block = None;
             } else if line.contains(['<', '>']) {
@@ -330,6 +355,7 @@ fn validate_config(bytes: &[u8]) -> Result<()> {
             remote_host(line)?;
         }
         if option == "auth-user-pass" {
+            auth.requires_credentials = true;
             if !args.is_empty() {
                 return Err(error(
                     "Use parameterless auth-user-pass; credentials are stored separately.",
@@ -337,11 +363,53 @@ fn validate_config(bytes: &[u8]) -> Result<()> {
             }
             continue;
         }
-        if option == "dev" && args.as_slice() != ["tun"] {
+        if matches!(option, "dev" | "dev-type") && args.as_slice() != ["tun"] {
             return Err(error("Only OpenVPN tun devices are supported."));
+        }
+        if option == "ignore-unknown-option"
+            && (args.is_empty()
+                || args
+                    .iter()
+                    .any(|value| !["data-ciphers", "block-outside-dns"].contains(value)))
+        {
+            return Err(error(
+                "Only known safe compatibility options may be ignored.",
+            ));
+        }
+        if matches!(option, "push-peer-info" | "block-outside-dns") && !args.is_empty() {
+            return Err(error(
+                "This OpenVPN compatibility option does not accept arguments.",
+            ));
+        }
+        if matches!(option, "hand-window" | "server-poll-timeout")
+            && (args.len() != 1 || args[0].parse::<u32>().map_or(true, |value| value == 0))
+        {
+            return Err(error(
+                "OpenVPN compatibility timeouts require one positive integer.",
+            ));
+        }
+        if option == "setenv" {
+            let key = args.first().copied().unwrap_or("");
+            let metadata = key.strip_prefix("UV_").is_some_and(|suffix| {
+                !suffix.is_empty()
+                    && suffix
+                        .bytes()
+                        .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == b'_')
+            });
+            if args.len() < 2 || !(key == "CLIENT_CERT" || metadata) {
+                return Err(error(
+                    "Only CLIENT_CERT and UV_ metadata environment entries are supported.",
+                ));
+            }
         }
         if ![
             "client",
+            "dev-type",
+            "ignore-unknown-option",
+            "block-outside-dns",
+            "push-peer-info",
+            "hand-window",
+            "server-poll-timeout",
             "dev",
             "proto",
             "remote",
@@ -388,7 +456,6 @@ fn validate_config(bytes: &[u8]) -> Result<()> {
             "setenv",
         ]
         .contains(&option)
-            || (option == "setenv" && args.first() != Some(&"CLIENT_CERT"))
         {
             return Err(error("Unsupported OpenVPN configuration: use inline certificates and keys, with no external files, scripts, plugins, management, logs or output overrides. OTP is unsupported."));
         }
@@ -396,7 +463,7 @@ fn validate_config(bytes: &[u8]) -> Result<()> {
     if block.is_some() {
         return Err(error("An inline certificate or key block is incomplete."));
     }
-    Ok(())
+    Ok(auth)
 }
 impl VpnManager {
     pub fn new(state_dir: PathBuf) -> Result<Self> {
@@ -497,14 +564,6 @@ impl VpnManager {
         let target = health_target(&input.health_target)?;
         let dns_address = ipv4_target(&input.dns_address, true)?;
         let health_icmp_target = ipv4_target(&input.health_icmp_target, false)?;
-        if [&input.username, &input.password]
-            .iter()
-            .any(|v| v.is_empty() || v.len() > 4096 || v.chars().any(char::is_control))
-        {
-            return Err(error(
-                "Provide a username and password without control characters. OTP is unsupported.",
-            ));
-        }
         let invalid_source = || {
             error("Choose a regular local OpenVPN file of at most 1 MiB, without symbolic links.")
         };
@@ -522,7 +581,23 @@ impl VpnManager {
         file.take(1_048_577)
             .read_to_end(&mut config)
             .map_err(|_| invalid_source())?;
-        validate_config(&config)?;
+        let auth = validate_config(&config)?;
+        if [&input.username, &input.password, &input.key_passphrase]
+            .iter()
+            .any(|v| v.len() > 4096 || v.chars().any(char::is_control))
+        {
+            return Err(error("VPN credentials and key passphrases must be at most 4096 bytes without control characters."));
+        }
+        if auth.requires_credentials && (input.username.is_empty() || input.password.is_empty()) {
+            return Err(error(
+                "This OpenVPN configuration requires a username and password. OTP is unsupported.",
+            ));
+        }
+        if auth.encrypted_key && input.key_passphrase.is_empty() {
+            return Err(error(
+                "This encrypted private key requires its key passphrase.",
+            ));
+        }
         let mut profiles = self.inner.profiles.lock().await;
         if profiles
             .iter()
@@ -534,8 +609,13 @@ impl VpnManager {
         let dir = self.inner.dir.join(&id);
         private_dir(&dir)?;
         secure_write(&dir.join("client.ovpn"), &config)?;
-        secure_write(&dir.join("username"), input.username.as_bytes())?;
-        secure_write(&dir.join("password"), input.password.as_bytes())?;
+        if auth.requires_credentials {
+            secure_write(&dir.join("username"), input.username.as_bytes())?;
+            secure_write(&dir.join("password"), input.password.as_bytes())?;
+        }
+        if auth.encrypted_key {
+            secure_write(&dir.join("key-passphrase"), input.key_passphrase.as_bytes())?;
+        }
         let fingerprint = uuid::Uuid::new_v4().to_string();
         let p = Profile {
             id,
@@ -545,6 +625,8 @@ impl VpnManager {
             dns_address,
             health_icmp_target,
             fingerprint,
+            requires_credentials: auth.requires_credentials,
+            has_key_passphrase: auth.encrypted_key,
         };
         let mut next = profiles.clone();
         next.push(p.clone());
@@ -784,11 +866,21 @@ impl VpnManager {
                 "VPN storage paths cannot contain commas or line breaks.",
             ));
         }
-        for file in ["client.ovpn", "username", "password"] {
-            read_private(&dir.join(file))?;
+        read_private(&dir.join("client.ovpn"))?;
+        if p.requires_credentials {
+            for file in ["username", "password"] {
+                read_private(&dir.join(file))?;
+            }
+        }
+        if p.has_key_passphrase {
+            read_private(&dir.join("key-passphrase"))?;
         }
         // Gluetun v3.41.0 accepts only numeric remote addresses; retain the imported original.
-        let runtime = runtime_config(&read_private(&dir.join("client.ovpn"))?).await?;
+        let runtime = runtime_config(
+            &read_private(&dir.join("client.ovpn"))?,
+            p.has_key_passphrase,
+        )
+        .await?;
         secure_write(&dir.join("gateway.ovpn"), &runtime)?;
         let mut cmd = s.command();
         cmd.args([
@@ -815,11 +907,17 @@ impl VpnManager {
             "--label",
             &format!("{FINGERPRINT}={}", p.fingerprint),
         ]);
-        for (file, target) in [
-            ("gateway.ovpn", "/gluetun/custom.conf"),
-            ("username", "/run/secrets/vpn_username"),
-            ("password", "/run/secrets/vpn_password"),
-        ] {
+        let mut mounts = vec![("gateway.ovpn", "/gluetun/custom.conf")];
+        if p.requires_credentials {
+            mounts.extend([
+                ("username", "/run/secrets/vpn_username"),
+                ("password", "/run/secrets/vpn_password"),
+            ]);
+        }
+        if p.has_key_passphrase {
+            mounts.push(("key-passphrase", "/run/secrets/vpn_key_passphrase"));
+        }
+        for (file, target) in mounts {
             cmd.arg("--mount").arg(format!(
                 "type=bind,source={},target={target},readonly",
                 dir.join(file).display()
@@ -829,8 +927,6 @@ impl VpnManager {
             "VPN_SERVICE_PROVIDER=custom".to_owned(),
             "VPN_TYPE=openvpn".into(),
             "OPENVPN_CUSTOM_CONFIG=/gluetun/custom.conf".into(),
-            "OPENVPN_USER_SECRETFILE=/run/secrets/vpn_username".into(),
-            "OPENVPN_PASSWORD_SECRETFILE=/run/secrets/vpn_password".into(),
             "FIREWALL=on".into(),
             format!(
                 "DNS_ADDRESS={}",
@@ -848,6 +944,18 @@ impl VpnManager {
             format!("HEALTH_TARGET_ADDRESSES={}", p.health_target),
         ] {
             cmd.arg("--env").arg(env);
+        }
+        if p.requires_credentials {
+            for setting in [
+                "OPENVPN_USER_SECRETFILE=/run/secrets/vpn_username",
+                "OPENVPN_PASSWORD_SECRETFILE=/run/secrets/vpn_password",
+            ] {
+                cmd.arg("--env").arg(setting);
+            }
+        }
+        if p.has_key_passphrase {
+            cmd.arg("--env")
+                .arg("OPENVPN_KEY_PASSPHRASE_SECRETFILE=/run/secrets/vpn_key_passphrase");
         }
         if !p.dns_address.is_empty() {
             cmd.arg("--env").arg("DNS_SERVER=off");
@@ -1031,12 +1139,12 @@ mod tests {
     #[tokio::test]
     async fn remote_normalization_preserves_imported_lines_and_inline_material() {
         let original=b"client\r\n  remote localhost 1194 udp # fixture\r\n<ca>\r\nremote untouched.example 443\r\n</ca>\r\nremote 192.0.2.1 443 tcp\r\n";
-        let normalized = runtime_config(original).await.unwrap();
+        let normalized = runtime_config(original, false).await.unwrap();
         assert_eq!(normalized,b"client\r\n  remote 127.0.0.1 1194 udp # fixture\r\n<ca>\r\nremote untouched.example 443\r\n</ca>\r\nremote 192.0.2.1 443 tcp\r\n");
         assert!(std::str::from_utf8(original)
             .unwrap()
             .contains("remote localhost"));
-        assert!(runtime_config(b"remote ::1 1194").await.is_err());
+        assert!(runtime_config(b"remote ::1 1194", false).await.is_err());
     }
     #[test]
     fn remote_parser_bounds_arguments_and_directive_count() {
@@ -1061,6 +1169,102 @@ mod tests {
         );
     }
     #[test]
+    fn config_detects_authentication_and_accepts_safe_client_compatibility() {
+        assert!(
+            validate_config(b"client\nauth-user-pass")
+                .unwrap()
+                .requires_credentials
+        );
+        let auth=validate_config(b"client\n<key>\n-----BEGIN ENCRYPTED PRIVATE KEY-----\nsynthetic\n-----END ENCRYPTED PRIVATE KEY-----\n</key>").unwrap();
+        assert!(!auth.requires_credentials);
+        assert!(auth.encrypted_key);
+        assert!(validate_config(b"client\nignore-unknown-option data-ciphers block-outside-dns\nblock-outside-dns\nsetenv UV_ID synthetic-id\nsetenv UV_NAME synthetic-name\nsetenv CLIENT_CERT 0\ndev-type tun\npush-peer-info\nhand-window 60\nserver-poll-timeout 30").is_ok());
+        for config in [
+            "setenv PATH /tmp",
+            "setenv LD_PRELOAD /tmp/lib",
+            "setenv UV_bad value",
+            "ignore-unknown-option script-security",
+            "dev-type tap",
+            "push-peer-info extra",
+            "hand-window 0",
+            "server-poll-timeout -1",
+            "askpass /tmp/keypass",
+        ] {
+            assert!(validate_config(config.as_bytes()).is_err());
+        }
+    }
+    #[tokio::test]
+    async fn certificate_profiles_omit_auth_secrets_and_keep_key_passphrase_private() {
+        let temp = tempfile::tempdir().unwrap();
+        let manager = VpnManager::new(temp.path().join("state")).unwrap();
+        let plain = temp.path().join("plain.ovpn");
+        fs::write(&plain, b"client\n<key>\nsynthetic-private-key\n</key>\n").unwrap();
+        let userpass = temp.path().join("userpass.ovpn");
+        fs::write(&userpass, b"client\nauth-user-pass\n").unwrap();
+        let encrypted = temp.path().join("encrypted.ovpn");
+        let encrypted_bytes=b"client\n<key>\n-----BEGIN ENCRYPTED PRIVATE KEY-----\nsynthetic-only\n-----END ENCRYPTED PRIVATE KEY-----\n</key>\n";
+        fs::write(&encrypted, encrypted_bytes).unwrap();
+        let input = |name: &str, path: &Path| VpnImport {
+            name: name.into(),
+            config_path: path.to_string_lossy().into(),
+            username: String::new(),
+            password: String::new(),
+            key_passphrase: String::new(),
+            published_ports: vec![],
+            health_target: String::new(),
+            dns_address: String::new(),
+            health_icmp_target: String::new(),
+        };
+        let view = manager.import(input("Certificate", &plain)).await.unwrap();
+        let dir = manager.inner.dir.join(&view.id);
+        assert!(!dir.join("username").exists());
+        assert!(!dir.join("password").exists());
+        assert!(!dir.join("key-passphrase").exists());
+        assert!(manager
+            .import(input("User password", &userpass))
+            .await
+            .is_err());
+        assert!(manager
+            .import(input("Encrypted missing", &encrypted))
+            .await
+            .is_err());
+        let mut request = input("Encrypted", &encrypted);
+        request.key_passphrase = "synthetic-key-passphrase".into();
+        let view = manager.import(request).await.unwrap();
+        let dir = manager.inner.dir.join(&view.id);
+        assert_eq!(
+            read_private(&dir.join("client.ovpn")).unwrap(),
+            encrypted_bytes
+        );
+        assert_eq!(
+            read_private(&dir.join("key-passphrase")).unwrap(),
+            b"synthetic-key-passphrase"
+        );
+        assert_eq!(
+            fs::metadata(dir.join("key-passphrase"))
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            0o600
+        );
+        assert!(!dir.join("username").exists());
+        assert!(!serde_json::to_string(&view)
+            .unwrap()
+            .contains("synthetic-key-passphrase"));
+        assert!(!String::from_utf8(
+            read_private(&manager.inner.dir.join("profiles.json")).unwrap()
+        )
+        .unwrap()
+        .contains("synthetic-key-passphrase"));
+        let runtime = runtime_config(encrypted_bytes, true).await.unwrap();
+        assert!(runtime.starts_with(encrypted_bytes));
+        assert!(runtime.ends_with(b"askpass /etc/openvpn/askpass\n"));
+        assert!(!runtime
+            .windows(b"synthetic-key-passphrase".len())
+            .any(|part| part == b"synthetic-key-passphrase"));
+    }
+    #[test]
     fn config_rejects_external_code_and_files() {
         for config in [
             "client\nup /tmp/run",
@@ -1071,7 +1275,6 @@ mod tests {
             "log out",
             "config other",
             "<connection>\nremote x\n</connection>",
-            "<key>\nENCRYPTED PRIVATE KEY\n</key>",
         ] {
             assert!(validate_config(config.as_bytes()).is_err(), "{config}");
         }
@@ -1147,6 +1350,7 @@ mod tests {
                 .import(VpnImport {
                     name: "Rejected fixture".into(),
                     config_path: source.to_string_lossy().into(),
+                    key_passphrase: String::new(),
                     username: "fixture".into(),
                     password: "synthetic-only".into(),
                     published_ports: vec![],
@@ -1170,6 +1374,7 @@ mod tests {
             .import(VpnImport {
                 name: "Office".into(),
                 config_path: config.to_string_lossy().into(),
+                key_passphrase: String::new(),
                 username: "private-user".into(),
                 password: "private-pass".into(),
                 published_ports: vec![],
@@ -1241,6 +1446,8 @@ mod tests {
             dns_address: String::new(),
             health_icmp_target: String::new(),
             fingerprint: "fp".into(),
+            requires_credentials: true,
+            has_key_passphrase: false,
         };
         let mut labels = serde_json::Map::new();
         labels.insert(OWNER.into(), m.inner.owner.clone().into());

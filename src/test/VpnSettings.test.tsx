@@ -166,3 +166,37 @@ it("allows disconnecting an unhealthy gateway without deleting its profile", asy
   await waitFor(() => expect(api.disconnectVpn).toHaveBeenCalledWith(profile.id));
   expect(api.removeVpnProfile).not.toHaveBeenCalled();
 });
+
+it("imports certificate-only encrypted keys without account credentials and clears the passphrase", async () => {
+  render(<VpnSettings profiles={[]} projects={[]} onRefresh={vi.fn()} />);
+  await fillImport();
+  await userEvent.selectOptions(screen.getByLabelText(/Authentication/), "certificate");
+  expect(screen.queryByLabelText("VPN username")).not.toBeInTheDocument();
+  expect(screen.queryByLabelText("VPN password")).not.toBeInTheDocument();
+  const passphrase = screen.getByLabelText(/Private key passphrase/);
+  await userEvent.type(passphrase, "synthetic-key-passphrase");
+  await userEvent.click(screen.getByRole("button", { name: "Import profile" }));
+  await waitFor(() => expect(api.importVpnProfile).toHaveBeenCalledWith(expect.objectContaining({ username: "", password: "", keyPassphrase: "synthetic-key-passphrase" })));
+  expect(passphrase).toHaveValue("");
+  expect(screen.getByRole("status")).not.toHaveTextContent("synthetic-key-passphrase");
+});
+it("preserves a key passphrase after certificate import failure without reflecting it", async () => {
+  vi.mocked(api.importVpnProfile).mockRejectedValue(new Error("synthetic-key-passphrase"));
+  render(<VpnSettings profiles={[]} projects={[]} onRefresh={vi.fn()} />);
+  await userEvent.selectOptions(screen.getByLabelText(/Authentication/), "certificate");
+  await userEvent.type(screen.getByLabelText("Profile name"), "Certificate fixture");
+  await userEvent.click(screen.getByRole("button", { name: "Choose .ovpn file" }));
+  await screen.findByText("fixture.ovpn");
+  await userEvent.type(screen.getByLabelText(/Private key passphrase/), "synthetic-key-passphrase");
+  await userEvent.click(screen.getByRole("button", { name: "Import profile" }));
+  expect(await screen.findByRole("alert")).not.toHaveTextContent("synthetic-key-passphrase");
+  expect(screen.getByLabelText(/Private key passphrase/)).toHaveValue("synthetic-key-passphrase");
+  expect(screen.getByLabelText("Profile name")).toHaveValue("Certificate fixture");
+});
+it("supports a separate encrypted-key passphrase with username/password authentication", async () => {
+  render(<VpnSettings profiles={[]} projects={[]} onRefresh={vi.fn()} />);
+  await fillImport();
+  await userEvent.type(screen.getByLabelText(/Private key passphrase/), "synthetic-separate-passphrase");
+  await userEvent.click(screen.getByRole("button", { name: "Import profile" }));
+  await waitFor(() => expect(api.importVpnProfile).toHaveBeenCalledWith(expect.objectContaining({ username: "synthetic-user", password: "synthetic-password", keyPassphrase: "synthetic-separate-passphrase" })));
+});

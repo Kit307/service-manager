@@ -175,6 +175,7 @@ async fn vpn_manager_shares_gateways_and_verifies_loss_cleanup() {
                 .import(VpnImport {
                     name: (*name).into(),
                     config_path: config_path.to_str().unwrap().into(),
+                    key_passphrase: String::new(),
                     username: "synthetic-user".into(),
                     password: "synthetic-password".into(),
                     published_ports: vec![],
@@ -323,4 +324,201 @@ async fn vpn_manager_shares_gateways_and_verifies_loss_cleanup() {
     manager.shutdown().await.unwrap();
     wait_terminal(&manager, &project.id, "b1", "stopped").await;
     println!("synthetic VPN manager proof passed: two gateways, shared workers, run reuse, post-restart guard, verified loss cleanup and unaffected other VPN");
+}
+
+#[tokio::test]
+#[ignore = "requires local Docker, OpenSSL, Gluetun v3.41.0 and alpine:3.23.3"]
+async fn vpn_manager_uses_certificate_only_encrypted_key() {
+    let fixture = match std::env::var_os("SM_VPN_FIXTURE_DIR") {
+        Some(path) => PathBuf::from(path),
+        None => {
+            let script = Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../.agents/evidence/TASK-0018/vpn-connected-proof.py");
+            let status = Command::new("python3")
+                .arg(script)
+                .arg(std::env::current_exe().unwrap())
+                .arg("vpn_manager_uses_certificate_only_encrypted_key")
+                .status()
+                .unwrap();
+            assert!(
+                status.success(),
+                "synthetic encrypted certificate proof failed"
+            );
+            return;
+        }
+    };
+    let server = std::env::var("SM_VPN_FIXTURE_SERVER").unwrap();
+    let state = fixture.join("state");
+    let root = fixture.join("project");
+    std::fs::create_dir(&root).unwrap();
+    let manager = Manager::new(state.clone()).unwrap();
+    let project = manager.open(root.to_str().unwrap()).await.unwrap();
+    let passphrase = std::fs::read_to_string(fixture.join("key-passphrase")).unwrap();
+    let octet = 2 + uuid::Uuid::new_v4().as_bytes()[0] % 240;
+    let endpoints = [
+        format!("10.232.{octet}.2"),
+        format!("10.232.{}.2", octet + 1),
+    ];
+    let mut profiles = Vec::new();
+    for (index, name) in ["Encrypted certificate", "Wrong key passphrase"]
+        .iter()
+        .enumerate()
+    {
+        let config = std::fs::read_to_string(fixture.join("client-certonly.ovpn"))
+            .unwrap()
+            .replace(
+                "remote synthetic-vpn-server 1194",
+                &format!("remote {} 1194", endpoints[index]),
+            );
+        assert!(!config.contains("auth-user-pass"));
+        assert!(config.contains("BEGIN ENCRYPTED PRIVATE KEY"));
+        let path = fixture.join(format!("certonly-{index}.ovpn"));
+        secure_write(&path, config.as_bytes()).unwrap();
+        profiles.push(
+            manager
+                .vpns
+                .import(VpnImport {
+                    name: (*name).into(),
+                    config_path: path.to_str().unwrap().into(),
+                    username: String::new(),
+                    password: String::new(),
+                    key_passphrase: if index == 0 {
+                        passphrase.clone()
+                    } else {
+                        "synthetic-wrong-passphrase".into()
+                    },
+                    published_ports: vec![],
+                    health_target: "10.66.0.1:5432".into(),
+                    dns_address: String::new(),
+                    health_icmp_target: "10.66.0.1".into(),
+                })
+                .await
+                .unwrap(),
+        );
+    }
+    for profile in &profiles {
+        let public = serde_json::to_string(profile).unwrap();
+        assert!(!public.contains(&passphrase));
+        assert!(!public.contains("PRIVATE KEY"));
+        assert!(!public.contains("synthetic-wrong-passphrase"));
+        assert!(!state
+            .join("vpn")
+            .join(&profile.id)
+            .join("username")
+            .exists());
+        assert!(!state
+            .join("vpn")
+            .join(&profile.id)
+            .join("password")
+            .exists());
+    }
+    let owner = std::fs::read_to_string(state.join("vpn/owner")).unwrap();
+    let metadata: Vec<Value> =
+        serde_json::from_slice(&std::fs::read(state.join("vpn/profiles.json")).unwrap()).unwrap();
+    let mut cleanup = Cleanup {
+        stacks: vec![],
+        gateways: vec![],
+        networks: vec![],
+        server,
+    };
+    for (index, p) in metadata.iter().enumerate() {
+        let id = p["id"].as_str().unwrap();
+        let fingerprint = p["fingerprint"].as_str().unwrap();
+        let name = format!("sm-vpn-{}-{id}", &owner[..8]);
+        let network = format!("{name}-net");
+        cleanup.gateways.push(name);
+        cleanup.networks.push(network.clone());
+        docker(&[
+            "network",
+            "create",
+            "--driver",
+            "bridge",
+            "--subnet",
+            &format!("10.232.{}.0/24", octet + index as u8),
+            "--label",
+            &format!("io.service-manager.vpn.owner={owner}"),
+            "--label",
+            &format!("io.service-manager.vpn.profile={id}"),
+            "--label",
+            &format!("io.service-manager.vpn.fingerprint={fingerprint}"),
+            &network,
+        ]);
+        docker(&[
+            "network",
+            "connect",
+            "--ip",
+            &endpoints[index],
+            &network,
+            &cleanup.server,
+        ]);
+    }
+    let definition = ServiceDefinition {
+        id: "encrypted".into(),
+        name: "Encrypted certificate worker".into(),
+        cwd: ".".into(),
+        kind: ServiceKind::Command {
+            command: "echo vpn-worker-marker; exec sleep 300".into(),
+        },
+        env_file: None,
+        vpn: Some(VpnService {
+            profile_id: profiles[0].id.clone(),
+            image: "alpine:3.23.3".into(),
+        }),
+        health_check: None,
+        ports: vec![],
+        url: None,
+        depends_on: vec![],
+    };
+    let saved = manager
+        .save(&project.id, definition, &project.revision, false)
+        .await
+        .unwrap();
+    manager
+        .store
+        .lock()
+        .await
+        .trust(&project.id, "encrypted", &saved.revision)
+        .unwrap();
+    cleanup.stacks.push(format!(
+        "sm-{}",
+        &hash(format!("{}/encrypted", project.id).as_bytes())[..24]
+    ));
+    manager
+        .start(&project.id, "encrypted", "test")
+        .await
+        .unwrap();
+    wait_marker(&manager, &project.id, "encrypted").await;
+    let worker = worker_id(&cleanup.stacks[0]);
+    assert!(reachable(&worker));
+    let inspected: Value =
+        serde_json::from_str(&docker(&["inspect", &cleanup.gateways[0]])).unwrap();
+    let process_public = serde_json::to_string(&inspected[0]["Config"]).unwrap();
+    assert!(!process_public.contains(&passphrase));
+    assert!(!process_public.contains("synthetic-wrong-passphrase"));
+    assert!(!process_public.contains("synthetic-user"));
+    assert!(!process_public.contains("synthetic-password"));
+    assert!(process_public.contains("OPENVPN_KEY_PASSPHRASE_SECRETFILE"));
+    assert!(!process_public.contains("/run/secrets/vpn_username"));
+    assert!(!process_public.contains("/run/secrets/vpn_password"));
+    let mounts = serde_json::to_string(&inspected[0]["Mounts"]).unwrap();
+    assert!(!mounts.contains("/run/secrets/vpn_username"));
+    assert!(!mounts.contains("/run/secrets/vpn_password"));
+    let rejected = manager.vpns.connect(&profiles[1].id).await;
+    assert!(
+        rejected.is_err(),
+        "wrong passphrase must not establish a gateway"
+    );
+    let rejected = match rejected {
+        Err(e) => e,
+        Ok(_) => unreachable!(),
+    };
+    assert!(!rejected.message.contains(&passphrase));
+    assert!(!rejected.message.contains("synthetic-wrong-passphrase"));
+    assert!(
+        reachable(&worker),
+        "failed other-profile auth must not interrupt the ready profile"
+    );
+    manager.shutdown().await.unwrap();
+    wait_terminal(&manager, &project.id, "encrypted", "stopped").await;
+    println!("encrypted certificate-only VPN proof passed: private passphrase, no username/password, worker reachable, public metadata redacted, wrong passphrase rejected");
 }

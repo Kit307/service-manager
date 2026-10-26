@@ -15,7 +15,7 @@
 
 Run Go, Node.js, and Docker Compose services without repeatedly typing commands. Organize them into groups, compare live logs, and let Codex or Claude Code use the same service manager through authenticated MCP or a generated log proxy.
 
-**Current source version: 0.8.0.** Local development app built with **Tauri, Rust, React, and TypeScript**. macOS Apple Silicon is the verified desktop target; Windows builds are not yet verified. macOS builds are unsigned and not notarized. There are currently no published GitHub Release downloads.
+**Current source version: 0.8.1.** Local development app built with **Tauri, Rust, React, and TypeScript**. macOS Apple Silicon is the verified desktop target; Windows builds are not yet verified. macOS builds are unsigned and not notarized. There are currently no published GitHub Release downloads.
 
 ![Service Manager overview with grouped API, web, and worker services, lifecycle controls, and readiness states](docs/images/overview.png)
 
@@ -143,4 +143,4 @@ Live output and run history are bounded, not permanent log backups. Completed-ru
 
 Command services can select a saved OpenVPN profile and Linux runtime image. Multiple services share one tunnel, while separate profiles connect concurrently inside Docker without changing the Mac VPN. Configure private DNS, health targets and loopback port mappings on the Docker VPN page. See [setup and limitations](docs/docker-vpn.md).
 
-This feature needs a local Docker engine and explicit image downloads. Remembered username/password with inline-certificate `.ovpn` files is supported; OTP/SSO and automatic Compose conversion are outside this release. The installed app is upgraded separately from the source build.
+This feature needs a local Docker engine and explicit image downloads. Certificate-only or username/password authentication with inline-certificate `.ovpn` files is supported. Encrypted inline keys can use a private saved key passphrase; OTP/SSO and automatic Compose conversion are outside this release. The installed app is upgraded separately from the source build.

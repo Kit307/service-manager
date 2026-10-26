@@ -14,6 +14,8 @@ with tempfile.TemporaryDirectory(prefix='.sm-vpn-fixture-',dir=ROOT) as tmp:
   openssl('req','-new','-newkey','rsa:2048','-nodes','-keyout',str(p/(role+'.key')),'-out',str(p/(role+'.csr')),'-subj','/CN='+role)
   (p/(role+'.ext')).write_text('basicConstraints=CA:FALSE\nkeyUsage=digitalSignature,keyEncipherment\nextendedKeyUsage='+('serverAuth' if role=='server' else 'clientAuth')+'\n')
   openssl('x509','-req','-in',str(p/(role+'.csr')),'-CA',str(p/'ca.crt'),'-CAkey',str(p/'ca.key'),'-CAcreateserial','-out',str(p/(role+'.crt')),'-days','1','-extfile',str(p/(role+'.ext')))
+ (p/'key-passphrase').write_text('synthetic-key-passphrase-only');(p/'key-passphrase').chmod(0o600)
+ openssl('pkcs8','-topk8','-v2','aes-256-cbc','-in',str(p/'client.key'),'-out',str(p/'client.encrypted.key'),'-passout','file:'+str(p/'key-passphrase'))
  (p/'server.ovpn').write_text('port 1194\nproto udp\ndev tun\ntopology subnet\nserver 10.66.0.0 255.255.255.0\nca /fixture/ca.crt\ncert /fixture/server.crt\nkey /fixture/server.key\ndh none\nduplicate-cn\ndata-ciphers AES-256-GCM\nauth SHA256\nkeepalive 2 10\nverb 3\n')
  (p/'username').write_text('synthetic-user');(p/'password').write_text('synthetic-password');(p/'resolver').write_text('nameserver 127.0.0.1\noptions ndots:0\n')
  for f in p.iterdir(): f.chmod(0o600)
@@ -25,9 +27,11 @@ with tempfile.TemporaryDirectory(prefix='.sm-vpn-fixture-',dir=ROOT) as tmp:
   if len(sys.argv)>1: remote='synthetic-vpn-server'
   (p/'client.ovpn').write_text('client\ndev tun\nproto udp\nremote '+remote+' 1194\nnobind\nauth-user-pass\nremote-cert-tls server\ndata-ciphers AES-256-GCM\nauth SHA256\n<ca>\n'+(p/'ca.crt').read_text()+'</ca>\n<cert>\n'+(p/'client.crt').read_text()+'</cert>\n<key>\n'+(p/'client.key').read_text()+'</key>\n')
   (p/'client.ovpn').chmod(0o600)
+  (p/'client-certonly.ovpn').write_text((p/'client.ovpn').read_text().replace('auth-user-pass\n','').replace((p/'client.key').read_text(),(p/'client.encrypted.key').read_text()))
+  (p/'client-certonly.ovpn').chmod(0o600)
   if len(sys.argv)>1:
    env=os.environ.copy();env.update(SM_VPN_FIXTURE_DIR=str(p),SM_VPN_FIXTURE_SERVER=server)
-   subprocess.run([sys.argv[1],'vpn_manager_shares_gateways_and_verifies_loss_cleanup','--ignored','--exact','--nocapture'],env=env,check=True)
+   subprocess.run([sys.argv[1],sys.argv[2] if len(sys.argv)>2 else 'vpn_manager_shares_gateways_and_verifies_loss_cleanup','--ignored','--exact','--nocapture'],env=env,check=True)
   else:
    for gw in gateways:
     args=['run','-d','--name',gw,'--network',net,'--label','dev.service-manager.proof='+run,'--cap-drop=ALL','--cap-add=NET_ADMIN','--cap-add=NET_RAW','--cap-add=CHOWN','--cap-add=DAC_OVERRIDE','--cap-add=SETUID','--cap-add=SETGID','--device=/dev/net/tun:/dev/net/tun','--security-opt=no-new-privileges:true','--restart=no']

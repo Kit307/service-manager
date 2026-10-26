@@ -23,3 +23,6 @@ End-to-end UI/config/runtime path and regressions pass; real Docker tests establ
 
 ## Completion
 TASK-0018 implemented and verified with synthetic Docker VPNs. App/DMG 0.8.0 built; installed app activation is intentionally separate. See task record and evidence for proof and network-specific limits.
+
+## Authentication follow-up
+TASK-0019 adds certificate-only and encrypted-key authentication compatibility in 0.8.1, with synthetic regression proof before real profile setup.

@@ -13,6 +13,8 @@ export function VpnSettings({ profiles, projects, onRefresh }: {
 }) {
   const [name, setName] = useState("");
   const [configPath, setConfigPath] = useState("");
+  const [authMode, setAuthMode] = useState("password");
+  const [keyPassphrase, setKeyPassphrase] = useState("");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [ports, setPorts] = useState("");
@@ -47,8 +49,8 @@ export function VpnSettings({ profiles, projects, onRefresh }: {
     if (publishedPorts.some((port) => [53, 8000, 9999].includes(port.container))) {
       setFormError("Container ports 53, 8000 and 9999 are reserved for VPN DNS, control and health."); return;
     }
-    if (!name.trim() || !configPath || !username.trim() || !password) {
-      setFormError("Choose an .ovpn file and enter a name, username and password."); return;
+    if (!name.trim() || !configPath || (authMode === "password" && (!username.trim() || !password))) {
+      setFormError("Choose an .ovpn file and enter a name and the credentials required by the selected authentication method."); return;
     }
     if (!/^[a-zA-Z0-9][a-zA-Z0-9.-]*:[0-9]+$/.test(healthTarget.trim()) || Number(healthTarget.split(":")[1]) < 1 || Number(healthTarget.split(":")[1]) > 65535) {
       setFormError("Use a TCP health endpoint as host:port, with a port from 1 to 65535."); return;
@@ -59,12 +61,12 @@ export function VpnSettings({ profiles, projects, onRefresh }: {
     }
     setFormError(""); setError(""); setStatus(""); setBusy(true);
     try {
-      await api.importVpnProfile({ name: name.trim(), configPath, username: username.trim(), password, publishedPorts, healthTarget: healthTarget.trim(), ...(dnsAddress.trim() ? { dnsAddress: dnsAddress.trim() } : {}), ...(healthIcmpTarget.trim() ? { healthIcmpTarget: healthIcmpTarget.trim() } : {}) });
-      setName(""); setConfigPath(""); setUsername(""); setPassword(""); setPorts(""); setDnsAddress(""); setHealthIcmpTarget("");
+      await api.importVpnProfile({ name: name.trim(), configPath, username: authMode === "password" ? username.trim() : "", password: authMode === "password" ? password : "", ...(keyPassphrase ? { keyPassphrase } : {}), publishedPorts, healthTarget: healthTarget.trim(), ...(dnsAddress.trim() ? { dnsAddress: dnsAddress.trim() } : {}), ...(healthIcmpTarget.trim() ? { healthIcmpTarget: healthIcmpTarget.trim() } : {}) });
+      setName(""); setConfigPath(""); setUsername(""); setPassword(""); setKeyPassphrase(""); setPorts(""); setDnsAddress(""); setHealthIcmpTarget("");
       setStatus("VPN profile imported. Credentials are stored privately on this Mac.");
     } catch {
       // Import errors must never reflect private input or config contents.
-      setFormError("Could not import profile. Check the .ovpn inline certificates, username/password and profile settings.");
+      setFormError("Could not import profile. Check the .ovpn inline certificates, authentication method, private key passphrase and profile settings.");
       setBusy(false); return;
     }
     try { await onRefresh(); } catch (cause) { setError(errorMessage(cause)); }
@@ -118,15 +120,29 @@ export function VpnSettings({ profiles, projects, onRefresh }: {
     </section>
     <form className="settings-section vpn-import" onSubmit={(event) => { event.preventDefault(); void importProfile(); }}>
       <h2>Import an OpenVPN profile</h2>
-      <p>Username/password and the imported configuration are stored privately by the app, outside project files. The .ovpn must include inline certificates and keys. OTP and browser SSO are unsupported.</p>
+      <p>Imported configuration, credentials and any private key passphrase are stored privately by the app, outside project files. The .ovpn must include inline certificates and keys. OTP and browser SSO are unsupported.</p>
       <label>Profile name<input required maxLength={80} value={name} onChange={(event) => setName(event.target.value)} /></label>
       <div className="vpn-file"><span>{configPath ? configPath.split(/[\\/]/).pop() : "No .ovpn file selected"}</span><button type="button" className="secondary" disabled={busy} onClick={() => void perform(async () => {
         const path = await pickVpnConfig(); if (typeof path === "string") setConfigPath(path);
       })}>Choose .ovpn file</button></div>
-      <div className="form-row">
+      <label>Authentication
+        <select value={authMode} disabled={busy} onChange={(event) => {
+          setAuthMode(event.target.value);
+          if (event.target.value === "certificate") { setUsername(""); setPassword(""); }
+        }}>
+          <option value="password">Username/password</option>
+          <option value="certificate">Certificate/key only</option>
+        </select>
+        <small>Match the .ovpn configuration. Profiles with auth-user-pass require a username and password.</small>
+      </label>
+      {authMode === "password" && <div className="form-row">
         <label>VPN username<input required autoComplete="off" value={username} onChange={(event) => setUsername(event.target.value)} /></label>
         <label>VPN password<input required type="password" autoComplete="new-password" value={password} onChange={(event) => setPassword(event.target.value)} /></label>
-      </div>
+      </div>}
+      <label>Private key passphrase <span className="optional">optional</span>
+        <input type="password" autoComplete="new-password" value={keyPassphrase} onChange={(event) => setKeyPassphrase(event.target.value)} />
+        <small>Required only when the inline private key is encrypted. This is separate from the VPN account password.</small>
+      </label>
       <label>TCP health endpoint<input required className="mono" value={healthTarget} onChange={(event) => setHealthTarget(event.target.value)} /><small>Use a reachable host:port, such as a private database on port 5432. Port 443 uses TLS; other ports check TCP connectivity.</small></label>
       <div className="form-row">
         <label>Corporate DNS IPv4 <span className="optional">optional</span><input className="mono" value={dnsAddress} placeholder="10.0.0.53" onChange={(event) => setDnsAddress(event.target.value)} /><small>Blank uses Gluetun’s default resolver. A private DNS IP is used directly by the gateway and workers for corporate hostnames.</small></label>

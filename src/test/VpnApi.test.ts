@@ -6,7 +6,7 @@ vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn(), ask: vi.fn() }));
 afterEach(() => { vi.clearAllMocks(); vi.unstubAllGlobals(); });
 it("uses native VPN command names and public payload contracts", async () => {
-  const input = { name: "Fixture", configPath: "/private/fixture.ovpn", username: "synthetic", password: "synthetic", publishedPorts: [], healthTarget: "database.private.invalid:5432", dnsAddress: "10.0.0.53", healthIcmpTarget: "10.0.0.54" };
+  const input = { name: "Fixture", configPath: "/private/fixture.ovpn", username: "synthetic", password: "synthetic", keyPassphrase: "synthetic-key", publishedPorts: [], healthTarget: "database.private.invalid:5432", dnsAddress: "10.0.0.53", healthIcmpTarget: "10.0.0.54" };
   await api.listVpnProfiles();
   await api.importVpnProfile(input);
   await api.connectVpn("fixture");
