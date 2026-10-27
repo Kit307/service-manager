@@ -94,6 +94,11 @@ it("navigates service tabs by keyboard and associates each selected panel", asyn
   expect(new Set(tabs.map((tab) => tab.getAttribute("aria-controls"))).size).toBe(4);
   expect(within(tablist).queryByRole("button", { name: "Open in log workspace" })).not.toBeInTheDocument();
   const check = (name: string) => {
+    for (const item of tabs) {
+      const panel = document.getElementById(item.getAttribute("aria-controls")!);
+      expect(panel).toHaveAttribute("role", "tabpanel");
+      expect(panel).toHaveAttribute("aria-labelledby", item.id);
+    }
     const tab = within(tablist).getByRole("tab", { name });
     expect(tab).toHaveFocus();
     expect(tab).toHaveAttribute("aria-selected", "true");
@@ -121,6 +126,21 @@ it("navigates service tabs by keyboard and associates each selected panel", asyn
   await user.keyboard("{ArrowRight}");
   check("Settings");
   expect(screen.getByLabelText("Service name")).toHaveValue("One draft");
+});
+
+it.each(["click", "Enter", "Space"])("keeps focus on Settings after %s activation", async (activation) => {
+  const user = userEvent.setup();
+  render(<App />);
+  await user.click(await screen.findByRole("button", { name: /One Running/ }));
+  const tab = screen.getByRole("tab", { name: "Settings" });
+  if (activation === "click") await user.click(tab);
+  else {
+    tab.focus();
+    await user.keyboard(activation === "Enter" ? "{Enter}" : " ");
+  }
+  expect(tab).toHaveFocus();
+  expect(tab).toHaveAttribute("aria-selected", "true");
+  expect(screen.getByLabelText("Service name")).toBeVisible();
 });
 
 it("opens the configured service URL through the native API", async () => {

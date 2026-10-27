@@ -189,6 +189,7 @@ describe("workspace interactions", () => {
     expect(
       screen.getByRole("heading", { name: "Add a service" }),
     ).toBeVisible();
+    expect(screen.getByLabelText("Service name")).toHaveFocus();
     expect(
       screen.queryByRole("button", { name: "Remove service" }),
     ).not.toBeInTheDocument();

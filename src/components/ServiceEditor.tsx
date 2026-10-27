@@ -14,8 +14,10 @@ export function ServiceEditor({
   services,
   projectId,
   vpnProfiles = [],
+  autoFocusName = true,
 }: {
   service?: ServiceDefinition;
+  autoFocusName?: boolean;
   vpnProfiles?: VpnProfile[];
   services?: ServiceEntry[];
   projectId?: string;
@@ -125,7 +127,7 @@ export function ServiceEditor({
         <label>
           Service name
           <input
-            autoFocus
+            autoFocus={autoFocusName}
             required
             value={name}
             placeholder="Frontend"

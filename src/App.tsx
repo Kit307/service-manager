@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useState } from "react";
-import { flushSync } from "react-dom";
 import {
   api,
   confirmAction,
@@ -774,7 +773,9 @@ export default function App() {
                 if (index < 0) return;
                 event.preventDefault();
                 const next = event.key === "Home" ? 0 : event.key === "End" ? buttons.length - 1 : (index + offset + buttons.length) % buttons.length;
-                flushSync(() => buttons[next]?.click());
+                const target = (["service", "settings", "history", "diagnostics"] as const)[next];
+                if (target === "settings") beginEdit("settings");
+                else setView(target);
                 buttons[next]?.focus();
               }}>
                 {(["service", "settings", "history", "diagnostics"] as const).map((tab) => (
@@ -810,22 +811,27 @@ export default function App() {
                 }}
               />
             </div>
-            {(view === "history" || view === "diagnostics") && <div role="tabpanel" id={`service-panel-${view}`} aria-labelledby={`service-tab-${view}`} className="service-pane"><ServiceOperations projectId={project.id} serviceId={service.id} mode={view} onService={(ref) => {
-              const target=workspace.projects.find((p) => p.id === ref.projectId); if(target) select(target,ref.serviceId);
-            }} /></div>}
-            {draft?.projectId === project.id &&
-              draft.serviceId === service.id && (
-                <section
-                  className="editor-scroll service-settings"
-                  role="tabpanel"
-                  id="service-panel-settings"
-                  aria-labelledby="service-tab-settings"
-                  hidden={view !== "settings"}
-                >
+            {(["history", "diagnostics"] as const).map((tab) => (
+              <div key={tab} role="tabpanel" id={`service-panel-${tab}`} aria-labelledby={`service-tab-${tab}`} className="service-pane" hidden={view !== tab}>
+                {view === tab && <ServiceOperations projectId={project.id} serviceId={service.id} mode={tab} onService={(ref) => {
+                  const target=workspace.projects.find((p) => p.id === ref.projectId); if(target) select(target,ref.serviceId);
+                }} />}
+              </div>
+            ))}
+            <section
+              className="editor-scroll service-settings"
+              role="tabpanel"
+              id="service-panel-settings"
+              aria-labelledby="service-tab-settings"
+              hidden={view !== "settings"}
+            >
+              {draft?.projectId === project.id && draft.serviceId === service.id && (
+                <>
                   <p className="editor-root">Working folder: {project.path}</p>
                   <ServiceEditor
                     key={`${draft.projectId}/${draft.serviceId}/${draft.revision}`}
                     service={draft.definition}
+                    autoFocusName={false}
                     saving={busy}
                     services={allServices}
                     vpnProfiles={workspace.vpns}
@@ -842,8 +848,9 @@ export default function App() {
                         : undefined
                     }
                   />
-                </section>
+                </>
               )}
+            </section>
           </>
         )}
       </main>
