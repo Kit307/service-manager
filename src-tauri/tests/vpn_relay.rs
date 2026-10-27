@@ -3,6 +3,7 @@ use service_manager::{
     vpn_relay::{RelayTarget, VpnRelaySet},
 };
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::time::Duration;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpListener, TcpStream},
@@ -121,7 +122,7 @@ async fn relay_rejects_occupied_ports_before_starting_any_listener() {
 #[tokio::test]
 async fn relay_does_not_fall_back_when_proxy_rejects_destination() {
     let local_port = free_port().await;
-    let _relay = VpnRelaySet::start(vec![RelayTarget {
+    let relay = VpnRelaySet::start(vec![RelayTarget {
         route: route(local_port, 443),
         proxy: proxy("502 Bad Gateway").await,
     }])
@@ -133,4 +134,81 @@ async fn relay_does_not_fall_back_when_proxy_rejects_destination() {
     client.write_all(b"must-not-pass").await.unwrap();
     let mut byte = [0u8; 1];
     assert!(matches!(client.read(&mut byte).await, Ok(0) | Err(_)));
+    let snapshot = relay.traffic()[0].snapshot();
+    assert_eq!(
+        (
+            snapshot.tx_bytes,
+            snapshot.rx_bytes,
+            snapshot.active_connections
+        ),
+        (0, 0, 0)
+    );
+}
+
+#[tokio::test]
+async fn traffic_tracks_live_payloads_and_independent_routes() {
+    let target_a = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
+    let target_b = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
+    let local_a = free_port().await;
+    let local_b = free_port().await;
+    let proxy = proxy("200 Connection Established").await;
+    let route_a = route(local_a, target_a.local_addr().unwrap().port());
+    let relay = VpnRelaySet::start(vec![
+        RelayTarget {
+            route: route_a.clone(),
+            proxy,
+        },
+        RelayTarget {
+            route: route(local_b, target_b.local_addr().unwrap().port()),
+            proxy,
+        },
+    ])
+    .await
+    .unwrap();
+    let traffic = relay.traffic();
+    let handle = traffic[0].clone();
+    let mut client_a = TcpStream::connect((Ipv4Addr::LOCALHOST, local_a))
+        .await
+        .unwrap();
+    let (mut remote_a, _) = target_a.accept().await.unwrap();
+    let mut client_b = TcpStream::connect((Ipv4Addr::LOCALHOST, local_b))
+        .await
+        .unwrap();
+    let (mut remote_b, _) = target_b.accept().await.unwrap();
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while traffic.iter().any(|t| t.snapshot().active_connections != 1) {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    let idle = handle.snapshot();
+    assert_eq!(idle.route.local_port, route_a.local_port);
+    assert_eq!(
+        (idle.tx_bytes, idle.rx_bytes, idle.active_connections),
+        (0, 0, 1)
+    );
+    client_a.write_all(b"hello").await.unwrap();
+    let mut bytes = [0; 5];
+    remote_a.read_exact(&mut bytes).await.unwrap();
+    assert_eq!(&bytes, b"hello");
+    remote_b.write_all(b"ok").await.unwrap();
+    let mut reply = [0; 2];
+    client_b.read_exact(&mut reply).await.unwrap();
+    assert_eq!(&reply, b"ok");
+    let a = handle.snapshot();
+    let b = traffic[1].snapshot();
+    assert_eq!((a.tx_bytes, a.rx_bytes, a.active_connections), (5, 0, 1));
+    assert_eq!((b.tx_bytes, b.rx_bytes, b.active_connections), (0, 2, 1));
+    drop(client_a);
+    drop(remote_a);
+    drop(client_b);
+    drop(remote_b);
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while traffic.iter().any(|t| t.snapshot().active_connections != 0) {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
 }
