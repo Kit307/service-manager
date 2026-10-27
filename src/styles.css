@@ -426,6 +426,7 @@ pre {
   background: var(--red);
 }
 .workspace {
+  background: var(--ops-panel-solid);
   min-width: 0;
   flex: 1;
   display: flex;
