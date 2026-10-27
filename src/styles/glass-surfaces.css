@@ -121,7 +121,7 @@ button:disabled {
 }
 
 :is(.command-display, .group-service-card, .service-icon, .welcome-icon, .endpoint) {
-  background: var(--control-glass);
+  background: var(--ops-panel-solid);
   border: 1px solid var(--control-rim);
   border-radius: 16px;
   box-shadow: var(--control-depth),

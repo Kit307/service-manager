@@ -22,3 +22,11 @@ it("opens central VPN settings with legacy workspace data and preserves the vers
   expect(screen.getByText("0.6")).toBeVisible();
   expect(screen.getByRole("button", { name: "Import profile" })).toBeVisible();
 });
+
+it("exposes the native ops shell landmarks", () => {
+  render(<App />);
+  expect(document.querySelector(".app-shell")).toHaveClass("ops-shell");
+  expect(screen.getByRole("complementary", { name: "Services" })).toHaveClass("ops-sidebar");
+  expect(screen.getByRole("main")).toHaveClass("ops-workspace");
+  expect(screen.getByRole("banner", { name: "Workspace context" })).toBeVisible();
+});

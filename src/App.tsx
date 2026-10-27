@@ -424,7 +424,7 @@ export default function App() {
 
   return (
     <div
-      className={`app-shell${isDesktop() && /Mac/.test(navigator.platform) ? " mac-window" : ""}`}
+      className={`app-shell ops-shell${isDesktop() && /Mac/.test(navigator.platform) ? " mac-window" : ""}`}
     >
       {isDesktop() && /Mac/.test(navigator.platform) && (
         <div
@@ -433,7 +433,7 @@ export default function App() {
           aria-hidden="true"
         />
       )}
-      <aside className="sidebar" aria-label="Services">
+      <aside className="sidebar ops-sidebar" aria-label="Services">
         <div className="brand">
           <span className="brand-mark">
             <Icon name="terminal" size={18} />
@@ -545,7 +545,7 @@ export default function App() {
           </div>
         </div>
       </aside>
-      <main className="workspace">
+      <main className="workspace ops-workspace">
         <FailureAlerts projects={workspace.projects} onService={(ref) => {
           const target = workspace.projects.find((p) => p.id === ref.projectId);
           if (target) select(target, ref.serviceId);
@@ -558,7 +558,7 @@ export default function App() {
           }}>{cancelling ? "Cancelling…" : "Cancel sequence"}</button>
         </div>}
 
-        <header className="workspace-bar">
+        <header className="workspace-bar ops-context-bar" role="banner" aria-label="Workspace context">
           <div className="breadcrumb">
             <Icon
               name={view === "vpn" ? "shield" : view === "logs" ? "terminal" : view === "ai" ? "ai" : group ? "group" : "grid"}

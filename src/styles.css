@@ -4,16 +4,27 @@
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
-  --canvas: #e9edf2;
+  --ops-canvas: #e4e9ef;
+  --ops-panel: rgb(248 250 252 / 78%);
+  --ops-panel-solid: #f4f7fa;
+  --ops-console: #0c1117;
+  --ops-console-ink: #dbe4ee;
+  --ops-rim: rgb(69 83 101 / 22%);
+  --ops-focus: #1d4ed8;
+  --ops-motion-fast: 120ms;
+  --ops-motion-base: 180ms;
+  --ops-radius-sm: 8px;
+  --ops-radius-md: 12px;
+  --canvas: var(--ops-canvas);
   --background-opacity: 55%;
-  --bg: rgb(255 255 255 / var(--background-opacity));
-  --log-bg: rgb(252 253 255 / 96%);
+  --bg: rgb(248 250 252 / var(--background-opacity));
+  --log-bg: var(--ops-panel-solid);
   --glass-highlight: rgb(255 255 255 / 80%);
   --glass-shadow: 0 4px 20px rgb(24 32 48 / 5%), inset 0 1px 0 var(--glass-highlight);
-  --sidebar: rgb(247 248 250 / 12%);
-  --surface: rgb(255 255 255 / 58%);
+  --sidebar: var(--ops-panel);
+  --surface: var(--ops-panel-solid);
   --hover: rgb(220 224 230 / 65%);
-  --line: rgb(103 116 136 / 20%);
+  --line: var(--ops-rim);
   --ink: oklch(0.24 0.005 280);
   --muted: oklch(0.49 0.008 280);
   --subtle: oklch(0.54 0.008 280);
@@ -33,15 +44,22 @@
   color-scheme: light;
 }
 :root[data-theme="dark"] {
-  --canvas: #20242b;
-  --bg: rgb(27 30 36 / var(--background-opacity));
-  --log-bg: rgb(23 26 32 / 96%);
+  --ops-canvas: #11161d;
+  --ops-panel: rgb(24 31 40 / 82%);
+  --ops-panel-solid: #171e27;
+  --ops-console: #090d12;
+  --ops-console-ink: #d9e2ec;
+  --ops-rim: rgb(204 216 230 / 16%);
+  --ops-focus: #93c5fd;
+  --canvas: var(--ops-canvas);
+  --bg: rgb(24 31 40 / var(--background-opacity));
+  --log-bg: var(--ops-panel-solid);
   --glass-highlight: rgb(255 255 255 / 12%);
   --glass-shadow: 0 4px 20px rgb(0 0 0 / 12%), inset 0 1px 0 var(--glass-highlight);
-  --sidebar: rgb(25 29 36 / 14%);
-  --surface: rgb(53 59 70 / 55%);
+  --sidebar: var(--ops-panel);
+  --surface: var(--ops-panel-solid);
   --hover: rgb(92 100 115 / 46%);
-  --line: rgb(191 203 224 / 18%);
+  --line: var(--ops-rim);
   --ink: oklch(0.92 0.002 280);
   --muted: oklch(0.72 0.008 280);
   --subtle: oklch(0.66 0.008 280);
@@ -59,15 +77,22 @@
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]):not([data-theme="dark"]) {
-    --canvas: #20242b;
-    --bg: rgb(27 30 36 / var(--background-opacity));
-    --log-bg: rgb(23 26 32 / 96%);
+    --ops-canvas: #11161d;
+    --ops-panel: rgb(24 31 40 / 82%);
+    --ops-panel-solid: #171e27;
+    --ops-console: #090d12;
+    --ops-console-ink: #d9e2ec;
+    --ops-rim: rgb(204 216 230 / 16%);
+    --ops-focus: #93c5fd;
+    --canvas: var(--ops-canvas);
+    --bg: rgb(24 31 40 / var(--background-opacity));
+    --log-bg: var(--ops-panel-solid);
     --glass-highlight: rgb(255 255 255 / 12%);
     --glass-shadow: 0 4px 20px rgb(0 0 0 / 12%), inset 0 1px 0 var(--glass-highlight);
-    --sidebar: rgb(25 29 36 / 14%);
-    --surface: rgb(53 59 70 / 55%);
+    --sidebar: var(--ops-panel);
+    --surface: var(--ops-panel-solid);
     --hover: rgb(92 100 115 / 46%);
-    --line: rgb(191 203 224 / 18%);
+    --line: var(--ops-rim);
     --ink: oklch(0.92 0.002 280);
     --muted: oklch(0.72 0.008 280);
     --subtle: oklch(0.66 0.008 280);
@@ -119,15 +144,15 @@ button:disabled {
 button,
 input {
   transition:
-    background-color 120ms ease-out,
-    border-color 120ms ease-out;
+    background-color var(--ops-motion-fast) ease-out,
+    border-color var(--ops-motion-fast) ease-out;
 }
 button:focus-visible,
 input:focus-visible,
 textarea:focus-visible,
 select:focus-visible,
 [tabindex]:focus-visible {
-  outline: 2px solid var(--selected-ink);
+  outline: 2px solid var(--ops-focus);
   outline-offset: 3px;
 }
 button svg {
@@ -369,7 +394,7 @@ pre {
   accent-color: var(--primary);
 }
 .background-opacity input:focus-visible {
-  outline: 2px solid var(--primary);
+  outline: 2px solid var(--ops-focus);
   outline-offset: 3px;
 }
 .sidebar-footer > span,
@@ -1374,4 +1399,13 @@ label small {
 @media (prefers-contrast: more) {
   :root { --line: currentColor !important; --muted: var(--ink) !important; --subtle: var(--ink) !important; --bg: var(--canvas) !important; --sidebar: var(--canvas) !important; --surface: var(--canvas) !important; --log-bg: var(--canvas) !important; }
   .app-shell { background: var(--canvas); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
 }
