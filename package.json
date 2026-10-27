@@ -10,7 +10,7 @@
     "typecheck": "tsc -b",
     "lint": "eslint src",
     "test": "vitest",
-    "test-app": "PATH=\"${CARGO_HOME:-$HOME/.cargo}/bin:$PATH\" SERVICE_MANAGER_MCP_PORT=47832 tauri dev --config src-tauri/tauri.test.conf.json",
+    "test-app": "PATH=\"${CARGO_HOME:-$HOME/.cargo}/bin:$PATH\" SERVICE_MANAGER_DATA_DIR=\"${SERVICE_MANAGER_DATA_DIR:-${TMPDIR:-/tmp}/service-manager-test-data}\" SERVICE_MANAGER_MCP_PORT=47832 tauri dev --config src-tauri/tauri.test.conf.json",
     "tauri": "tauri"
   },
   "dependencies": {
