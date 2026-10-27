@@ -35,7 +35,9 @@ Optional `ports`, `url` and `dependsOn` definitions are documented in [the contr
 
 ## Shared Docker VPN (v0.8.0)
 
-Use read-only `list_vpn_profiles {}` to discover public profile IDs, health, published ports and active users. Importing credentials, connecting/disconnecting/removing profiles and downloading images are desktop actions; never invent MCP or proxy mutations for them. A requested command service can use optional `vpn: {profileId, image}` through revision-checked `upsert_service`. It runs in a Linux container, requires an explicitly prepared image and Linux-compatible command, and never falls back to a native host command. Compose does not support this field. Omit it for native services and preserve unavailable profile selections until the user requests a network change. Read [the contract](references/contract.md) before editing. Never request raw config, credentials or gateway logs for diagnostics.
+Use read-only `list_vpn_profiles {}` to discover public profile IDs, health, published ports and active users. Importing credentials, connecting/disconnecting/removing profiles and downloading images are desktop actions; never invent MCP or proxy mutations for them. A requested command service can use optional `vpnRoutes: [{profileId, remoteHost, remotePort, localPort}]` through revision-checked `upsert_service`. Its saved command, cwd, env and logs remain native; only connections to the configured loopback relay use the selected shared gateway. Compose does not support routes. Preserve unavailable profile routes until the user requests a network change. Read [the contract](references/contract.md) before editing. Never request raw config, credentials or gateway logs for diagnostics.
+
+New native destination routes are TCP-only and bind `127.0.0.1`. Point the application dependency setting at the chosen local port; never edit env files or source without explicit scope. Missing or changed gateway ownership stops the service and relay without direct-network fallback. Legacy profile-level published ports remain desktop-only compatibility settings.
 
 ## Proxy workflow
 

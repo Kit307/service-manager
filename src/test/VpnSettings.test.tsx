@@ -9,9 +9,9 @@ import type { ServiceDefinition, VpnProfile } from "../lib/types";
 vi.mock("../lib/api", async (original) => ({
   ...await original<typeof import("../lib/api")>(),
   confirmAction: vi.fn(), pickVpnConfig: vi.fn(),
-  api: { respondVpnChallenge: vi.fn(), importVpnProfile: vi.fn(), connectVpn: vi.fn(), disconnectVpn: vi.fn(), removeVpnProfile: vi.fn(), listVpnProfiles: vi.fn(), pullContainerImage: vi.fn() },
+  api: { respondVpnChallenge: vi.fn(), importVpnProfile: vi.fn(), updateVpnNetwork: vi.fn(), connectVpn: vi.fn(), disconnectVpn: vi.fn(), removeVpnProfile: vi.fn(), listVpnProfiles: vi.fn(), pullContainerImage: vi.fn() },
 }));
-const profile: VpnProfile = { id: "fixture-vpn", name: "Fixture VPN", healthTarget: "cloudflare.com:443", publishedPorts: [{ host: 3000, container: 8080 }], state: "ready", users: [] };
+const profile: VpnProfile = { id: "fixture-vpn", name: "Fixture VPN", healthTarget: "cloudflare.com:443", publishedPorts: [{ host: 3000, container: 8080 }], outboundSubnets: [], state: "ready", users: [] };
 const service: ServiceDefinition = { id: "fixture", name: "Fixture", type: "command", command: "npm start", cwd: "." };
 beforeEach(() => {
   vi.resetAllMocks();
@@ -90,6 +90,18 @@ it("downloads the pinned gateway only on explicit request and preserves useful e
   expect(api.pullContainerImage).toHaveBeenCalledWith("qmcgaw/gluetun:v3.41.0");
   expect(await screen.findByText("Docker is unavailable")).toBeVisible();
 });
+it("edits ports and private outbound CIDRs on a disconnected profile without reimporting credentials", async () => {
+  const refresh = vi.fn();
+  vi.mocked(api.updateVpnNetwork).mockResolvedValue({ ...profile, publishedPorts: [{ host: 3000, container: 3000 }], outboundSubnets: ["192.168.5.0/24"] });
+  render(<VpnSettings profiles={[{ ...profile, state: "disconnected", publishedPorts: [] }]} projects={[]} onRefresh={refresh} />);
+  const row = within(screen.getByRole("article", { name: "Fixture VPN" }));
+  await userEvent.type(row.getByLabelText("Published ports"), "3000:3000");
+  await userEvent.type(row.getByLabelText(/Local outbound CIDRs/), "192.168.5.0/24");
+  await userEvent.click(row.getByRole("button", { name: "Save network" }));
+  await waitFor(() => expect(api.updateVpnNetwork).toHaveBeenCalledWith(profile.id, [{ host: 3000, container: 3000 }], ["192.168.5.0/24"]));
+  expect(api.importVpnProfile).not.toHaveBeenCalled();
+  expect(refresh).toHaveBeenCalled();
+});
 it("preserves absent vpn for native and Compose services", async () => {
   const save = vi.fn();
   render(<ServiceEditor service={service} saving={false} onSave={save} onCancel={vi.fn()} />);
@@ -99,29 +111,39 @@ it("preserves absent vpn for native and Compose services", async () => {
   await userEvent.click(screen.getByRole("button", { name: "Save service" }));
   expect(save).toHaveBeenLastCalledWith({ id: "fixture", name: "Fixture", type: "compose", file: "compose.yaml", cwd: "." });
 });
-it("saves chosen VPN/runtime image without changing command and removes vpn when switching to Compose", async () => {
+it("saves multiple VPN destination routes without changing the native command", async () => {
   const save = vi.fn();
-  render(<ServiceEditor service={service} vpnProfiles={[profile]} saving={false} onSave={save} onCancel={vi.fn()} />);
-  await userEvent.selectOptions(screen.getByLabelText("VPN profile"), profile.id);
-  const image = screen.getByLabelText("Linux runtime image");
-  expect(image).toHaveValue("node:22-bookworm-slim");
-  await userEvent.clear(image); await userEvent.type(image, "golang:1.24-bookworm");
+  const second = { ...profile, id: "fixture-vpn-2", name: "Second VPN" };
+  render(<ServiceEditor service={service} vpnProfiles={[profile, second]} saving={false} onSave={save} onCancel={vi.fn()} />);
+  await userEvent.click(screen.getByRole("button", { name: "Add VPN route" }));
+  await userEvent.selectOptions(screen.getByLabelText("VPN profile 1"), profile.id);
+  await userEvent.type(screen.getByLabelText("Destination host 1"), "sso.internal.example");
+  await userEvent.type(screen.getByLabelText("Remote port 1"), "443");
+  await userEvent.type(screen.getByLabelText("Local port 1"), "18443");
+  await userEvent.click(screen.getByRole("button", { name: "Add VPN route" }));
+  await userEvent.selectOptions(screen.getByLabelText("VPN profile 2"), second.id);
+  await userEvent.type(screen.getByLabelText("Destination host 2"), "database.internal.example");
+  await userEvent.type(screen.getByLabelText("Remote port 2"), "5432");
+  await userEvent.type(screen.getByLabelText("Local port 2"), "15432");
   await userEvent.click(screen.getByRole("button", { name: "Save service" }));
-  expect(save).toHaveBeenLastCalledWith({ ...service, vpn: { profileId: profile.id, image: "golang:1.24-bookworm" } });
-  expect(api.pullContainerImage).not.toHaveBeenCalled();
+  expect(save).toHaveBeenLastCalledWith({ ...service, vpnRoutes: [
+    { profileId: profile.id, remoteHost: "sso.internal.example", remotePort: 443, localPort: 18443 },
+    { profileId: second.id, remoteHost: "database.internal.example", remotePort: 5432, localPort: 15432 },
+  ] });
+  expect(screen.getByText(/service command still runs natively/i)).toBeVisible();
   await userEvent.click(screen.getByLabelText("Docker Compose"));
-  expect(screen.queryByLabelText("VPN profile")).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Add VPN route" })).not.toBeInTheDocument();
   await userEvent.click(screen.getByRole("button", { name: "Save service" }));
-  expect(save.mock.lastCall?.[0]).not.toHaveProperty("vpn");
+  expect(save.mock.lastCall?.[0]).not.toHaveProperty("vpnRoutes");
 });
-it("preserves missing saved profile until the user selects another network", async () => {
+it("preserves a missing saved route profile until the route is removed", async () => {
   const save = vi.fn();
-  const saved: ServiceDefinition = { ...service, vpn: { profileId: "missing", image: "node:22-bookworm-slim" } };
+  const saved: ServiceDefinition = { ...service, vpnRoutes: [{ profileId: "missing", remoteHost: "db.internal.example", remotePort: 5432, localPort: 15432 }] };
   render(<ServiceEditor service={saved} vpnProfiles={[]} saving={false} onSave={save} onCancel={vi.fn()} />);
   expect(screen.getByRole("option", { name: "Unavailable profile (missing)" })).toBeDisabled();
   await userEvent.click(screen.getByRole("button", { name: "Save service" }));
   expect(save).toHaveBeenLastCalledWith(saved);
-  await userEvent.selectOptions(screen.getByLabelText("VPN profile"), "");
+  await userEvent.click(screen.getByRole("button", { name: "Remove VPN route 1" }));
   await userEvent.click(screen.getByRole("button", { name: "Save service" }));
   expect(save).toHaveBeenLastCalledWith(service);
 });
@@ -138,13 +160,6 @@ it("canceled confirmations never change a VPN and refresh explicitly lists profi
   await waitFor(() => expect(refresh).toHaveBeenCalled());
   expect(api.listVpnProfiles).toHaveBeenCalled();
 });
-it("downloads a chosen runtime explicitly and reports completion", async () => {
-  render(<ServiceEditor service={{ ...service, vpn: { profileId: profile.id, image: "node:22-bookworm-slim" } }} vpnProfiles={[profile]} saving={false} onSave={vi.fn()} onCancel={vi.fn()} />);
-  await userEvent.click(screen.getByRole("button", { name: "Download runtime image" }));
-  expect(api.pullContainerImage).toHaveBeenCalledWith("node:22-bookworm-slim");
-  expect(await screen.findByRole("status")).toHaveTextContent("Runtime image is ready locally");
-});
-
 it("validates optional corporate IPv4 settings and imports a private TCP target", async () => {
   render(<VpnSettings profiles={[]} projects={[]} onRefresh={vi.fn()} />);
   await fillImport();

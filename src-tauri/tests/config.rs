@@ -14,6 +14,7 @@ fn command(cwd: &str) -> ServiceDefinition {
         url: None,
         depends_on: vec![],
         vpn: None,
+        vpn_routes: vec![],
     }
 }
 #[test]

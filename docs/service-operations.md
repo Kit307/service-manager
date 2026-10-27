@@ -60,4 +60,4 @@ The plugin uses private macOS APIs. A future OS update can change or break its e
 
 ## Shared Docker VPN
 
-Command services can opt into a shared Docker VPN profile and Linux runtime image. Configure/import profiles and shared loopback port mappings on the central Docker VPN page, then select one in service Settings. Image downloads require explicit preparation; VPN selection never rewrites the command or silently falls back to native execution. Compose and absent-vpn definitions keep their existing behavior. See [shared Docker VPN](docker-vpn.md) for setup, credentials/privacy, runtime requirements and verification limits.
+Command services can add explicit TCP destination routes through shared Docker VPN profiles while keeping the application process native. Configure/import profiles centrally, then add `remoteHost:remotePort` → `127.0.0.1:localPort` routes in service Settings. Service Manager never rewrites commands, env files or source, and gateway loss never falls back to direct networking. Compose and route-free commands keep their existing behavior. See [shared Docker VPN](docker-vpn.md) for setup and limits.

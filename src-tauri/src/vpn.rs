@@ -21,6 +21,9 @@ const IMAGE: &str = "qmcgaw/gluetun:v3.41.0";
 const OWNER: &str = "io.service-manager.vpn.owner";
 const PROFILE: &str = "io.service-manager.vpn.profile";
 const FINGERPRINT: &str = "io.service-manager.vpn.fingerprint";
+const RELAY: &str = "io.service-manager.vpn.relay";
+const RELAY_VERSION: &str = "1";
+const HTTP_PROXY_PORT: u16 = 8888;
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct VpnPortMapping {
@@ -41,6 +44,8 @@ pub struct VpnImport {
     #[serde(default)]
     pub published_ports: Vec<VpnPortMapping>,
     #[serde(default)]
+    pub outbound_subnets: Vec<String>,
+    #[serde(default)]
     pub health_target: String,
     #[serde(default)]
     pub dns_address: String,
@@ -53,6 +58,7 @@ pub struct VpnProfileView {
     pub id: String,
     pub name: String,
     pub published_ports: Vec<VpnPortMapping>,
+    pub outbound_subnets: Vec<String>,
     pub health_target: String,
     #[serde(default)]
     pub dns_address: String,
@@ -75,6 +81,8 @@ struct Profile {
     id: String,
     name: String,
     published_ports: Vec<VpnPortMapping>,
+    #[serde(default)]
+    outbound_subnets: Vec<String>,
     health_target: String,
     #[serde(default)]
     dns_address: String,
@@ -111,6 +119,7 @@ pub struct VpnLease {
     pub gateway_id: String,
     pub published_ports: Vec<VpnPortMapping>,
     pub dns_address: String,
+    pub(crate) proxy_port: u16,
     inner: Arc<Inner>,
     profile: String,
     token: String,
@@ -172,6 +181,91 @@ fn validate_ports(ports: &[VpnPortMapping]) -> Result<()> {
         return Err(error("Use up to 32 distinct nonzero host and container ports; container ports 53, 8000, 9999 and 11940 are reserved for VPN DNS, control, health and authentication."));
     }
     Ok(())
+}
+fn validate_outbound_subnets(subnets: &[String]) -> Result<Vec<String>> {
+    let mut unique = HashSet::new();
+    let mut validated = Vec::new();
+    if subnets.len() > 16 {
+        return Err(error("Use up to 16 private IPv4 CIDRs."));
+    }
+    for subnet in subnets {
+        let (address, prefix) = subnet
+            .trim()
+            .split_once('/')
+            .ok_or_else(|| error("Use canonical private IPv4 CIDRs such as 192.168.5.0/24."))?;
+        let address = address
+            .parse::<std::net::Ipv4Addr>()
+            .map_err(|_| error("Use canonical private IPv4 CIDRs such as 192.168.5.0/24."))?;
+        let prefix = prefix
+            .parse::<u32>()
+            .map_err(|_| error("Use canonical private IPv4 CIDRs such as 192.168.5.0/24."))?;
+        if !(1..=32).contains(&prefix) {
+            return Err(error("Use canonical private IPv4 CIDRs such as 192.168.5.0/24."));
+        }
+        let mask = u32::MAX << (32 - prefix);
+        let raw = u32::from(address);
+        let broadcast = std::net::Ipv4Addr::from(raw | !mask);
+        if raw & mask != raw || !address.is_private() || !broadcast.is_private() {
+            return Err(error("Only canonical RFC1918 IPv4 CIDRs are allowed."));
+        }
+        let canonical = format!("{address}/{prefix}");
+        if !unique.insert(canonical.clone()) {
+            return Err(error("VPN outbound CIDRs must be unique."));
+        }
+        validated.push(canonical);
+    }
+    Ok(validated)
+}
+fn replace_network(
+    profiles: &[Profile],
+    id: &str,
+    published_ports: Vec<VpnPortMapping>,
+    outbound_subnets: Vec<String>,
+) -> Result<Vec<Profile>> {
+    validate_ports(&published_ports)?;
+    let outbound_subnets = validate_outbound_subnets(&outbound_subnets)?;
+    let mut next = profiles.to_vec();
+    let profile = next
+        .iter_mut()
+        .find(|profile| profile.id == id)
+        .ok_or_else(|| error("VPN profile no longer exists."))?;
+    profile.published_ports = published_ports;
+    profile.outbound_subnets = outbound_subnets;
+    Ok(next)
+}
+fn firewall_environment(profile: &Profile) -> Vec<String> {
+    let mut input_ports = std::collections::BTreeSet::from([HTTP_PROXY_PORT]);
+    input_ports.extend(profile.published_ports.iter().map(|port| port.container));
+    let mut environment = vec![format!(
+        "FIREWALL_INPUT_PORTS={}",
+        input_ports
+            .into_iter()
+            .map(|port| port.to_string())
+            .collect::<Vec<_>>()
+            .join(",")
+    )];
+    if !profile.outbound_subnets.is_empty() {
+        environment.push(format!(
+            "FIREWALL_OUTBOUND_SUBNETS={}",
+            profile.outbound_subnets.join(",")
+        ));
+    }
+    environment
+}
+
+fn proxy_port(gateway: &Value) -> Result<u16> {
+    let binding = gateway["NetworkSettings"]["Ports"][format!("{HTTP_PROXY_PORT}/tcp")]
+        .as_array()
+        .and_then(|bindings| bindings.first())
+        .ok_or_else(|| error("VPN relay proxy binding is unavailable."))?;
+    if binding["HostIp"].as_str() != Some("127.0.0.1") {
+        return Err(error("VPN relay proxy must bind only to loopback."));
+    }
+    binding["HostPort"]
+        .as_str()
+        .and_then(|port| port.parse().ok())
+        .filter(|port| *port != 0)
+        .ok_or_else(|| error("VPN relay proxy port is invalid."))
 }
 fn ipv4_target(input: &str, dns: bool) -> Result<String> {
     let input = input.trim();
@@ -523,6 +617,7 @@ impl VpnManager {
                 return Err(error("VPN profile identity is invalid."));
             }
             validate_ports(&p.published_ports)?;
+            validate_outbound_subnets(&p.outbound_subnets)?;
             health_target(&p.health_target)?;
             ipv4_target(&p.dns_address, true)?;
             ipv4_target(&p.health_icmp_target, false)?;
@@ -617,6 +712,7 @@ impl VpnManager {
             id: p.id.clone(),
             name: p.name.clone(),
             published_ports: p.published_ports.clone(),
+            outbound_subnets: p.outbound_subnets.clone(),
             health_target: p.health_target.clone(),
             dns_address: p.dns_address.clone(),
             health_icmp_target: ipv4_target(&p.health_icmp_target, false)
@@ -655,6 +751,7 @@ impl VpnManager {
             return Err(error("Choose a VPN name between 1 and 80 characters."));
         }
         validate_ports(&input.published_ports)?;
+        let outbound_subnets = validate_outbound_subnets(&input.outbound_subnets)?;
         let target = health_target(&input.health_target)?;
         let dns_address = ipv4_target(&input.dns_address, true)?;
         let health_icmp_target = ipv4_target(&input.health_icmp_target, false)?;
@@ -715,6 +812,7 @@ impl VpnManager {
             id,
             name: name.into(),
             published_ports: input.published_ports,
+            outbound_subnets,
             health_target: target,
             dns_address,
             health_icmp_target,
@@ -762,12 +860,109 @@ impl VpnManager {
         self.ensure(&session, p).await?;
         Ok(self.view(p, "ready", None))
     }
+    pub async fn update_network(
+        &self,
+        id: &str,
+        published_ports: Vec<VpnPortMapping>,
+        outbound_subnets: Vec<String>,
+        owned_workers: &HashSet<String>,
+    ) -> Result<VpnProfileView> {
+        validate_ports(&published_ports)?;
+        let outbound_subnets = validate_outbound_subnets(&outbound_subnets)?;
+        let _operation = self.operation(id).await;
+        let snapshot = self.inner.profiles.lock().await.clone();
+        let current = find(&snapshot, id)?;
+        if current.published_ports == published_ports
+            && current.outbound_subnets == outbound_subnets
+        {
+            let state = match DockerSession::pinned(&self.inner.dir).await {
+                Ok(session) => self
+                    .gateway(&session, current)
+                    .await?
+                    .as_ref()
+                    .map(container_state)
+                    .unwrap_or("disconnected"),
+                Err(_) => "unavailable",
+            };
+            return Ok(self.view(current, state, None));
+        }
+        if !self.users(id).is_empty() {
+            return Err(error(
+                "Stop every service using this VPN before changing network access.",
+            ));
+        }
+        if self.bridge(id).is_some() {
+            return Err(error(
+                "Finish or cancel VPN authentication before changing network access.",
+            ));
+        }
+        let session = DockerSession::pinned(&self.inner.dir).await?;
+        session.verify().await?;
+        if let Some(gateway) = self.gateway(&session, current).await? {
+            if gateway["State"]["Running"].as_bool() == Some(true) {
+                return Err(error(
+                    "Disconnect this VPN before changing network access.",
+                ));
+            }
+            let gateway_id = gateway["Id"]
+                .as_str()
+                .ok_or_else(|| error("Gateway identity is missing."))?;
+            remove_owned_stopped_namespace_users(
+                &session,
+                gateway_id,
+                &self.name(current),
+                owned_workers,
+            )
+            .await?;
+            let verified = inspect(&session, gateway_id).await?;
+            if !self.owns(&verified, current) {
+                return Err(error("VPN gateway ownership changed; it was preserved."));
+            }
+            let mut command = session.command();
+            command.args(["container", "rm", gateway_id]);
+            capture(command).await?;
+        }
+        let updated = self
+            .commit_network(
+                id,
+                &current.published_ports,
+                &current.outbound_subnets,
+                published_ports,
+                outbound_subnets,
+            )
+            .await?;
+        Ok(self.view(&updated, "disconnected", None))
+    }
+    async fn commit_network(
+        &self,
+        id: &str,
+        expected_ports: &[VpnPortMapping],
+        expected_subnets: &[String],
+        published_ports: Vec<VpnPortMapping>,
+        outbound_subnets: Vec<String>,
+    ) -> Result<Profile> {
+        let mut profiles = self.inner.profiles.lock().await;
+        let current = find(&profiles, id)?;
+        if current.published_ports != expected_ports
+            || current.outbound_subnets != expected_subnets
+        {
+            return Err(error(
+                "VPN network settings changed. Refresh the profile before saving again.",
+            ));
+        }
+        let next = replace_network(&profiles, id, published_ports, outbound_subnets)?;
+        self.persist(&next)?;
+        let updated = find(&next, id)?.clone();
+        *profiles = next;
+        Ok(updated)
+    }
     pub async fn acquire(&self, id: &str, user: &ServiceRef, run_id: &str) -> Result<VpnLease> {
         let _operation = self.operation(id).await;
         let profiles = self.inner.profiles.lock().await.clone();
         let p = find(&profiles, id)?;
         let session = DockerSession::pinned(&self.inner.dir).await?;
         let gateway_id = self.ensure(&session, p).await?;
+        let proxy_port = proxy_port(&inspect(&session, &gateway_id).await?)?;
         // A unique token prevents an old run's Drop from releasing a newer run's lease.
         let token = format!("{run_id}:{}", uuid::Uuid::new_v4());
         self.inner
@@ -786,6 +981,7 @@ impl VpnManager {
             } else {
                 p.dns_address.clone()
             },
+            proxy_port,
             inner: self.inner.clone(),
             profile: id.into(),
             token,
@@ -959,12 +1155,13 @@ impl VpnManager {
                 .ok_or_else(|| error("Gateway identity is missing."))?
                 .to_owned();
             let running = v["State"]["Running"].as_bool().unwrap_or(false);
-            if p.requires_credentials
-                && v["Config"]["Labels"][mfa::MANAGEMENT_LABEL].as_str()
-                    != Some(mfa::MANAGEMENT_VERSION)
-            {
+            let compatible = v["Config"]["Labels"][RELAY].as_str() == Some(RELAY_VERSION)
+                && (!p.requires_credentials
+                    || v["Config"]["Labels"][mfa::MANAGEMENT_LABEL].as_str()
+                        == Some(mfa::MANAGEMENT_VERSION));
+            if !compatible {
                 if running {
-                    return Err(error("Disconnect this older username/password gateway before reconnecting to enable MFA. Its services were preserved."));
+                    return Err(error("Disconnect this older VPN gateway before reconnecting to enable native destination relays. Its services were preserved."));
                 }
                 self.stop(p).await?;
                 let mut command = s.command();
@@ -1097,6 +1294,10 @@ impl VpnManager {
             &format!("{PROFILE}={}", p.id),
             "--label",
             &format!("{FINGERPRINT}={}", p.fingerprint),
+            "--label",
+            &format!("{RELAY}={RELAY_VERSION}"),
+            "--publish",
+            &format!("127.0.0.1::{HTTP_PROXY_PORT}/tcp"),
         ]);
         if p.requires_credentials {
             let password_file = dir.join("management-password");
@@ -1142,6 +1343,8 @@ impl VpnManager {
             "VPN_TYPE=openvpn".into(),
             "OPENVPN_CUSTOM_CONFIG=/gluetun/custom.conf".into(),
             "FIREWALL=on".into(),
+            "HTTPPROXY=on".into(),
+            "HTTPPROXY_LOG=off".into(),
             format!(
                 "DNS_ADDRESS={}",
                 if p.dns_address.is_empty() {
@@ -1174,15 +1377,8 @@ impl VpnManager {
         if !p.dns_address.is_empty() {
             cmd.arg("--env").arg("DNS_SERVER=off");
         }
-        if !p.published_ports.is_empty() {
-            cmd.arg("--env").arg(format!(
-                "FIREWALL_INPUT_PORTS={}",
-                p.published_ports
-                    .iter()
-                    .map(|p| p.container.to_string())
-                    .collect::<Vec<_>>()
-                    .join(",")
-            ));
+        for environment in firewall_environment(p) {
+            cmd.arg("--env").arg(environment);
         }
         for port in &p.published_ports {
             cmd.arg("--publish")
@@ -1260,16 +1456,7 @@ impl VpnManager {
         let id = v["Id"]
             .as_str()
             .ok_or_else(|| error("Gateway identity is missing."))?;
-        let mut cmd = s.command();
-        cmd.args(["container", "ls", "--quiet", "--no-trunc"]);
-        let ids = String::from_utf8(capture(cmd).await?)
-            .map_err(|_| error("Docker returned invalid container identities."))?;
-        for other in ids.lines().filter(|other| *other != id) {
-            let other = inspect(&s, other).await?;
-            if namespace_uses(&s, other, id, &self.name(p)).await? {
-                return Err(error("A running Docker container still shares this VPN network. Stop it before disconnecting or removing the profile."));
-            }
-        }
+        ensure_no_namespace_users(&s, id, &self.name(p)).await?;
         let current = inspect(&s, id).await?;
         if !self.owns(&current, p) {
             return Err(error("VPN gateway ownership changed; it was preserved."));
@@ -1285,6 +1472,99 @@ impl VpnManager {
             ));
         }
         Ok(())
+    }
+}
+async fn ensure_no_namespace_users(s: &DockerSession, gateway: &str, name: &str) -> Result<()> {
+    let mut command = s.command();
+    command.args(["container", "ls", "--quiet", "--no-trunc"]);
+    let ids = String::from_utf8(capture(command).await?)
+        .map_err(|_| error("Docker returned invalid container identities."))?;
+    for other in ids.lines().filter(|other| *other != gateway) {
+        if namespace_uses(s, inspect(s, other).await?, gateway, name).await? {
+            return Err(error("A running Docker container still shares this VPN network. Stop it before disconnecting or changing the profile."));
+        }
+    }
+    Ok(())
+}
+fn owned_stopped_worker(container: &Value, owners: &HashSet<String>) -> bool {
+    container["State"]["Running"].as_bool() == Some(false)
+        && container["Config"]["Labels"]["com.docker.compose.service"].as_str() == Some("worker")
+        && container["Config"]["Labels"]["dev.service-manager.owner"]
+            .as_str()
+            .is_some_and(|owner| owners.contains(owner))
+}
+fn direct_namespace_uses(container: &Value, gateway: &str, name: &str) -> bool {
+    container["HostConfig"]["NetworkMode"]
+        .as_str()
+        .and_then(|mode| mode.strip_prefix("container:"))
+        .is_some_and(|target| {
+            target == gateway
+                || target == name
+                || (!target.is_empty() && gateway.starts_with(target))
+        })
+}
+async fn remove_owned_stopped_namespace_users(
+    session: &DockerSession,
+    gateway: &str,
+    name: &str,
+    owners: &HashSet<String>,
+) -> Result<()> {
+    let mut command = session.command();
+    command.args(["container", "ls", "--all", "--quiet", "--no-trunc"]);
+    let ids = String::from_utf8(capture(command).await?)
+        .map_err(|_| error("Docker returned invalid container identities."))?;
+    let mut removable = Vec::new();
+    for id in ids.lines().filter(|id| *id != gateway) {
+        let container = inspect(session, id).await?;
+        if !namespace_uses(session, container.clone(), gateway, name).await? {
+            continue;
+        }
+        if !owned_stopped_worker(&container, owners)
+            || !direct_namespace_uses(&container, gateway, name)
+        {
+            return Err(error("A Docker container still references this VPN network. Stop it in its owning environment before changing published ports."));
+        }
+        removable.push(id.to_string());
+    }
+    for id in removable {
+        let verified = inspect(session, &id).await?;
+        if !owned_stopped_worker(&verified, owners)
+            || !direct_namespace_uses(&verified, gateway, name)
+        {
+            return Err(error(
+                "A stopped VPN worker changed during verification; it was preserved.",
+            ));
+        }
+        let mut remove = session.command();
+        remove.args(["container", "rm", id.as_str()]);
+        capture(remove).await?;
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod relay_proxy_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn reads_loopback_http_proxy_port_from_gateway_inspection() {
+        let gateway = json!({
+            "NetworkSettings": {
+                "Ports": {
+                    "8888/tcp": [{"HostIp":"127.0.0.1","HostPort":"49123"}]
+                }
+            }
+        });
+        assert_eq!(proxy_port(&gateway).unwrap(), 49123);
+    }
+
+    #[test]
+    fn rejects_missing_or_public_http_proxy_bindings() {
+        assert!(proxy_port(&json!({})).is_err());
+        assert!(proxy_port(&json!({
+            "NetworkSettings":{"Ports":{"8888/tcp":[{"HostIp":"0.0.0.0","HostPort":"49123"}]}}
+        })).is_err());
     }
 }
 fn find<'a>(profiles: &'a [Profile], id: &str) -> Result<&'a Profile> {
@@ -1344,6 +1624,20 @@ fn container_state(v: &Value) -> &'static str {
         }
     }
 }
+fn gateway_safe_for_workers(
+    gateway: &Value,
+    owner: &str,
+    profile: &str,
+    fingerprint: &str,
+    gateway_id: &str,
+) -> bool {
+    let labels = &gateway["Config"]["Labels"];
+    labels[OWNER].as_str() == Some(owner)
+        && labels[PROFILE].as_str() == Some(profile)
+        && labels[FINGERPRINT].as_str() == Some(fingerprint)
+        && gateway["Id"].as_str() == Some(gateway_id)
+        && gateway["State"]["Running"].as_bool() == Some(true)
+}
 impl VpnLease {
     pub async fn healthy(&self) -> Result<bool> {
         if self
@@ -1364,6 +1658,17 @@ impl VpnLease {
             && l[FINGERPRINT].as_str() == Some(&self.fingerprint)
             && v["Id"].as_str() == Some(&self.gateway_id)
             && container_state(&v) == "ready")
+    }
+    pub async fn worker_safe(&self) -> Result<bool> {
+        self.session.verify().await?;
+        let gateway = inspect(&self.session, &self.gateway_id).await?;
+        Ok(gateway_safe_for_workers(
+            &gateway,
+            &self.inner.owner,
+            &self.profile,
+            &self.fingerprint,
+            &self.gateway_id,
+        ))
     }
 }
 fn release_token(inner: &Inner, profile: &str, token: &str) {
@@ -1485,6 +1790,7 @@ mod tests {
             password: String::new(),
             key_passphrase: String::new(),
             published_ports: vec![],
+            outbound_subnets: vec![],
             health_target: String::new(),
             dns_address: String::new(),
             health_icmp_target: String::new(),
@@ -1606,6 +1912,167 @@ mod tests {
         assert_eq!(health_target("").unwrap(), "cloudflare.com:443");
         assert!(health_target("private.example:443").is_ok());
     }
+    #[test]
+    fn outbound_subnets_accept_only_canonical_private_ipv4_cidrs() {
+        assert_eq!(
+            validate_outbound_subnets(&["192.168.5.0/24".into(), "10.0.0.0/8".into()])
+                .unwrap(),
+            vec!["192.168.5.0/24", "10.0.0.0/8"]
+        );
+        for subnet in [
+            "0.0.0.0/0",
+            "192.168.5.2/24",
+            "127.0.0.0/8",
+            "8.8.8.0/24",
+            "192.168.5.0/33",
+            "::1/128",
+        ] {
+            assert!(validate_outbound_subnets(&[subnet.into()]).is_err(), "{subnet}");
+        }
+        assert!(validate_outbound_subnets(&[
+            "192.168.5.0/24".into(),
+            "192.168.5.0/24".into()
+        ])
+        .is_err());
+    }
+    #[test]
+    fn gateway_firewall_env_allows_only_explicit_ports_and_loopback_relay_proxy() {
+        let profile = Profile {
+            id: "profile-id".into(),
+            name: "Office".into(),
+            published_ports: vec![VpnPortMapping {
+                host: 8080,
+                container: 8080,
+            }],
+            outbound_subnets: vec!["192.168.5.0/24".into()],
+            health_target: "private.example:443".into(),
+            dns_address: String::new(),
+            health_icmp_target: String::new(),
+            fingerprint: "fingerprint".into(),
+            requires_credentials: false,
+            has_key_passphrase: false,
+        };
+        assert_eq!(
+            firewall_environment(&profile),
+            vec![
+                "FIREWALL_INPUT_PORTS=8080,8888",
+                "FIREWALL_OUTBOUND_SUBNETS=192.168.5.0/24"
+            ]
+        );
+    }
+    #[test]
+    fn replacing_profile_ports_preserves_private_profile_identity() {
+        let original = Profile {
+            id: "profile-id".into(),
+            name: "Office".into(),
+            published_ports: vec![],
+            outbound_subnets: vec![],
+            health_target: "private.example:443".into(),
+            dns_address: "10.0.0.53".into(),
+            health_icmp_target: "10.0.0.54".into(),
+            fingerprint: "fingerprint".into(),
+            requires_credentials: true,
+            has_key_passphrase: true,
+        };
+        let next = replace_network(
+            &[original.clone()],
+            "profile-id",
+            vec![VpnPortMapping {
+                host: 3000,
+                container: 3000,
+            }],
+            vec!["192.168.5.0/24".into()],
+        )
+        .unwrap();
+        assert_eq!(
+            next[0].published_ports,
+            vec![VpnPortMapping {
+                host: 3000,
+                container: 3000
+            }]
+        );
+        assert_eq!(next[0].id, original.id);
+        assert_eq!(next[0].fingerprint, original.fingerprint);
+        assert_eq!(next[0].health_target, original.health_target);
+        assert_eq!(next[0].dns_address, original.dns_address);
+        assert_eq!(next[0].health_icmp_target, original.health_icmp_target);
+        assert_eq!(next[0].requires_credentials, original.requires_credentials);
+        assert_eq!(next[0].has_key_passphrase, original.has_key_passphrase);
+        assert_eq!(next[0].outbound_subnets, vec!["192.168.5.0/24"]);
+        assert!(replace_network(&[original], "missing", vec![], vec![]).is_err());
+    }
+    #[tokio::test]
+    async fn committing_ports_preserves_concurrent_profiles_and_rejects_stale_state() {
+        let temp = tempfile::tempdir().unwrap();
+        let manager = VpnManager::new(temp.path().join("state")).unwrap();
+        let profile = |id: &str, ports: Vec<VpnPortMapping>| Profile {
+            id: id.into(),
+            name: id.into(),
+            published_ports: ports,
+            outbound_subnets: vec![],
+            health_target: "private.example:443".into(),
+            dns_address: String::new(),
+            health_icmp_target: String::new(),
+            fingerprint: format!("{id}-fingerprint"),
+            requires_credentials: false,
+            has_key_passphrase: false,
+        };
+        *manager.inner.profiles.lock().await = vec![profile("a", vec![]), profile("b", vec![])];
+        manager
+            .commit_network(
+                "a",
+                &[],
+                &[],
+                vec![VpnPortMapping {
+                    host: 3000,
+                    container: 3000,
+                }],
+                vec!["192.168.5.0/24".into()],
+            )
+            .await
+            .unwrap();
+        let current = manager.inner.profiles.lock().await.clone();
+        assert_eq!(current.len(), 2);
+        assert_eq!(current[1].id, "b");
+        assert!(manager
+            .commit_network("a", &[], &[], vec![], vec![])
+            .await
+            .is_err());
+        assert_eq!(
+            manager.inner.profiles.lock().await[0].published_ports[0].host,
+            3000
+        );
+    }
+    #[test]
+    fn only_owned_stopped_vpn_workers_are_replaceable() {
+        let owners = HashSet::from(["service-owner".to_string()]);
+        let worker = serde_json::json!({
+            "State": {"Running": false},
+            "HostConfig": {"NetworkMode": "container:gateway-id"},
+            "Config": {"Labels": {
+                "dev.service-manager.owner": "service-owner",
+                "com.docker.compose.service": "worker"
+            }}
+        });
+        assert!(owned_stopped_worker(&worker, &owners));
+        assert!(direct_namespace_uses(&worker, "gateway-id", "gateway-name"));
+        let mut indirect = worker.clone();
+        indirect["HostConfig"]["NetworkMode"] = "container:another-worker".into();
+        assert!(!direct_namespace_uses(
+            &indirect,
+            "gateway-id",
+            "gateway-name"
+        ));
+        let mut running = worker.clone();
+        running["State"]["Running"] = true.into();
+        assert!(!owned_stopped_worker(&running, &owners));
+        let mut foreign = worker.clone();
+        foreign["Config"]["Labels"]["dev.service-manager.owner"] = "foreign".into();
+        assert!(!owned_stopped_worker(&foreign, &owners));
+        let mut compose_service = worker;
+        compose_service["Config"]["Labels"]["com.docker.compose.service"] = "api".into();
+        assert!(!owned_stopped_worker(&compose_service, &owners));
+    }
     #[tokio::test]
     async fn import_rejects_symlinks_and_oversized_files_without_saving_profiles() {
         let temp = tempfile::tempdir().unwrap();
@@ -1628,6 +2095,7 @@ mod tests {
                     username: "fixture".into(),
                     password: "synthetic-only".into(),
                     published_ports: vec![],
+                    outbound_subnets: vec![],
                     health_target: String::new(),
                     dns_address: String::new(),
                     health_icmp_target: String::new(),
@@ -1652,6 +2120,7 @@ mod tests {
                 username: "private-user".into(),
                 password: "private-pass".into(),
                 published_ports: vec![],
+                outbound_subnets: vec![],
                 health_target: String::new(),
                 dns_address: String::new(),
                 health_icmp_target: String::new(),
@@ -1716,6 +2185,7 @@ mod tests {
             id: "p".into(),
             name: "P".into(),
             published_ports: vec![],
+            outbound_subnets: vec![],
             health_target: "host:443".into(),
             dns_address: String::new(),
             health_icmp_target: String::new(),
@@ -1731,5 +2201,33 @@ mod tests {
         assert!(m.owns(&value, &p));
         value["Config"]["Labels"][OWNER] = "foreign".into();
         assert!(!m.owns(&value, &p));
+    }
+    #[test]
+    fn active_workers_survive_transient_gateway_health_loss() {
+        let mut labels = serde_json::Map::new();
+        labels.insert(OWNER.into(), "owner".into());
+        labels.insert(PROFILE.into(), "profile".into());
+        labels.insert(FINGERPRINT.into(), "fingerprint".into());
+        let mut gateway = serde_json::json!({
+            "Id": "gateway",
+            "Config": {"Labels": labels},
+            "State": {"Running": true, "Health": {"Status": "unhealthy"}}
+        });
+
+        assert!(gateway_safe_for_workers(
+            &gateway,
+            "owner",
+            "profile",
+            "fingerprint",
+            "gateway"
+        ));
+        gateway["State"]["Running"] = false.into();
+        assert!(!gateway_safe_for_workers(
+            &gateway,
+            "owner",
+            "profile",
+            "fingerprint",
+            "gateway"
+        ));
     }
 }

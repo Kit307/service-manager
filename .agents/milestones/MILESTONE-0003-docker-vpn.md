@@ -29,3 +29,6 @@ TASK-0019 adds certificate-only and encrypted-key authentication compatibility i
 
 ## Interactive challenge follow-up
 TASK-0020 implements separately approved dynamic CRV1 MFA/PIN support in 0.8.2 for independent simultaneous VPN profiles.
+
+## Local upstream follow-up
+TASK-0022 adds a narrow private-subnet allowlist so VPN workers can reach explicitly selected services on the Mac without disabling the gateway firewall.

@@ -68,6 +68,7 @@ async fn compose_owns_one_stack_and_stop_uses_the_launch_snapshot() {
         },
         env_file: None,
         vpn: None,
+        vpn_routes: vec![],
         health_check: None,
         ports: vec![],
         url: None,

@@ -1,6 +1,7 @@
 pub mod compose;
 pub mod docker;
 pub mod vpn;
+pub mod vpn_relay;
 #[cfg(feature = "desktop")]
 pub mod desktop;
 pub mod history;

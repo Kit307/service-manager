@@ -8,6 +8,8 @@ use nix::{
     unistd::Pid,
 };
 use std::{
+    collections::HashMap,
+    net::{IpAddr, Ipv4Addr, SocketAddr},
     path::{Path, PathBuf},
     process::Stdio,
     sync::{
@@ -21,6 +23,26 @@ use tokio::{
     io::{AsyncRead, AsyncReadExt},
     process::Command,
 };
+
+fn uses_compose_runner(definition: &ServiceDefinition) -> bool {
+    matches!(definition.kind, ServiceKind::Compose { .. }) || definition.vpn.is_some()
+}
+
+struct NativeVpnSession {
+    _relays: crate::vpn_relay::VpnRelaySet,
+    leases: Vec<crate::vpn::VpnLease>,
+}
+
+impl NativeVpnSession {
+    async fn safe(&self) -> bool {
+        for lease in &self.leases {
+            if !lease.worker_safe().await.unwrap_or(false) {
+                return false;
+            }
+        }
+        true
+    }
+}
 #[derive(Clone)]
 pub struct Manager {
     pub store: Arc<Mutex<ProjectStore>>,
@@ -61,6 +83,25 @@ impl Manager {
         projects.sort_by(|a, b| a.name.cmp(&b.name));
         projects
     }
+    pub async fn update_vpn_network(
+        &self,
+        id: &str,
+        published_ports: Vec<crate::vpn::VpnPortMapping>,
+        outbound_subnets: Vec<String>,
+    ) -> Result<crate::vpn::VpnProfileView> {
+        let owners = self
+            .store
+            .lock()
+            .await
+            .private
+            .compose_owners
+            .values()
+            .cloned()
+            .collect();
+        self.vpns
+            .update_network(id, published_ports, outbound_subnets, &owners)
+            .await
+    }
     pub async fn save(
         &self,
         project: &str,
@@ -75,6 +116,14 @@ impl Manager {
                     &crate::ports::configured_ports(&definition),
                 )
                 .await?;
+        }
+        for route in &definition.vpn_routes {
+            if !self.vpns.exists(&route.profile_id).await {
+                return Err(AppError::new(
+                    "VPN_ERROR",
+                    "A selected VPN profile no longer exists.",
+                ));
+            }
         }
         let mut store = self.store.lock().await;
         let mut p = store.refresh(project)?;
@@ -141,6 +190,46 @@ impl Manager {
             .await
             .read(&format!("{project}/{service}"), cursor))
     }
+
+    async fn prepare_native_vpn(
+        &self,
+        routes: &[VpnRoute],
+        user: &crate::project::ServiceRef,
+        run: &str,
+    ) -> Result<NativeVpnSession> {
+        let mut profiles = HashMap::new();
+        let mut leases = Vec::new();
+        for route in routes {
+            if profiles.contains_key(&route.profile_id) {
+                continue;
+            }
+            let lease = self.vpns.acquire(&route.profile_id, user, run).await?;
+            if !lease.healthy().await? {
+                return Err(AppError::new(
+                    "VPN_ERROR",
+                    "A selected VPN is not ready. Reconnect it before starting the service.",
+                ));
+            }
+            profiles.insert(route.profile_id.clone(), lease.proxy_port);
+            leases.push(lease);
+        }
+        let targets = routes
+            .iter()
+            .map(|route| crate::vpn_relay::RelayTarget {
+                route: route.clone(),
+                proxy: SocketAddr::new(
+                    IpAddr::V4(Ipv4Addr::LOCALHOST),
+                    profiles[&route.profile_id],
+                ),
+            })
+            .collect();
+        let relays = crate::vpn_relay::VpnRelaySet::start(targets).await?;
+        Ok(NativeVpnSession {
+            _relays: relays,
+            leases,
+        })
+    }
+
     pub async fn start(&self, project: &str, service: &str, actor: &str) -> Result<Snapshot> {
         let mut store = self.store.lock().await;
         if self.shutting_down.load(Ordering::SeqCst) {
@@ -196,7 +285,7 @@ impl Manager {
             }
         }
         let cwd = inside(Path::new(&p.path), &definition.cwd)?;
-        if matches!(definition.kind, ServiceKind::Compose { .. }) || definition.vpn.is_some() {
+        if uses_compose_runner(&definition) {
             let key = format!("{project}/{service}");
             let owner = store
                 .private
@@ -250,6 +339,72 @@ impl Manager {
             });
             return Ok(snapshot);
         }
+        let run = uuid::Uuid::new_v4().to_string();
+        let mut route_session = None;
+        if !definition.vpn_routes.is_empty() {
+            store.private.dirty = true;
+            store.persist()?;
+            self.history
+                .lock()
+                .await
+                .begin(project, service, &run, match &definition.kind {
+                    ServiceKind::Command { command } => command,
+                    ServiceKind::Compose { .. } => unreachable!(),
+                })?;
+            let starting = Snapshot {
+                state: "starting".into(),
+                started_at: Some(chrono::Utc::now().to_rfc3339()),
+                run_id: Some(run.clone()),
+                activity: format!("VPN relay preflight via {actor}"),
+                ..Snapshot::default()
+            };
+            store
+                .projects
+                .get_mut(project)
+                .unwrap()
+                .runtime
+                .insert(service.into(), starting);
+            drop(store);
+            let user = crate::project::ServiceRef {
+                project_id: project.into(),
+                service_id: service.into(),
+            };
+            let prepared = self
+                .prepare_native_vpn(&definition.vpn_routes, &user, &run)
+                .await;
+            store = self.store.lock().await;
+            let current = store
+                .projects
+                .get_mut(project)
+                .and_then(|project| project.runtime.get_mut(service))
+                .ok_or_else(|| AppError::new("SERVICE_NOT_FOUND", "Service does not exist."))?;
+            if current.run_id.as_deref() != Some(&run) {
+                return Err(AppError::new(
+                    "OPERATION_IN_PROGRESS",
+                    "The managed run changed during VPN setup.",
+                ));
+            }
+            route_session = match prepared {
+                Ok(session) if current.state != "stopping" => Some(session),
+                Ok(_) => {
+                    current.state = "stopped".into();
+                    current.activity = "Stopped during VPN setup".into();
+                    let terminal = current.clone();
+                    drop(store);
+                    self.finish_history(project, service, &terminal).await;
+                    return Ok(terminal);
+                }
+                Err(error) => {
+                    current.state = "failed".into();
+                    current.error = Some(error.message.clone());
+                    current.activity = "VPN relay setup failed".into();
+                    let terminal = current.clone();
+                    drop(store);
+                    self.finish_history(project, service, &terminal).await;
+                    return Err(error);
+                }
+            };
+        }
         let ServiceKind::Command { command } = &definition.kind else {
             unreachable!()
         };
@@ -278,13 +433,14 @@ impl Manager {
                 cmd.env(key, value);
             }
         }
-        store.private.dirty = true;
-        store.persist()?;
-        let run = uuid::Uuid::new_v4().to_string();
-        self.history
-            .lock()
-            .await
-            .begin(project, service, &run, command)?;
+        if route_session.is_none() {
+            store.private.dirty = true;
+            store.persist()?;
+            self.history
+                .lock()
+                .await
+                .begin(project, service, &run, command)?;
+        }
         let mut child = match cmd.spawn() {
             Ok(child) => child,
             Err(_) => {
@@ -352,6 +508,17 @@ impl Manager {
             "system",
             "Started service. Output is shared with the desktop and authorized AI clients.",
         );
+        if !definition.vpn_routes.is_empty() {
+            self.logs.lock().await.push(
+                &key,
+                &run,
+                "system",
+                &format!(
+                    "Opened {} loopback VPN destination relay(s). The service process remains native.",
+                    definition.vpn_routes.len()
+                ),
+            );
+        }
         let stdout = child.stdout.take();
         let stderr = child.stderr.take();
         let a = stdout.map(|pipe| {
@@ -378,7 +545,44 @@ impl Manager {
         let service_id = service.to_string();
         let run_id = run.clone();
         tokio::spawn(async move {
-            let result = child.wait().await;
+            let mut wait = Box::pin(child.wait());
+            let mut vpn_failure = None;
+            let result = if let Some(session) = route_session.as_ref() {
+                loop {
+                    tokio::select! {
+                        result = &mut wait => break result,
+                        _ = tokio::time::sleep(Duration::from_secs(1)) => {
+                            if vpn_failure.is_none() && !session.safe().await {
+                                let message = "VPN gateway stopped or ownership was lost. The native service and its loopback relays were stopped.".to_string();
+                                vpn_failure = Some(message.clone());
+                                if let Some(current) = manager
+                                    .store
+                                    .lock()
+                                    .await
+                                    .projects
+                                    .get_mut(&project_id)
+                                    .and_then(|project| project.runtime.get_mut(&service_id))
+                                {
+                                    if current.run_id.as_deref() == Some(&run_id) {
+                                        current.state = "stopping".into();
+                                        current.error = Some(message);
+                                    }
+                                }
+                                let _ = killpg(Pid::from_raw(pid as i32), Signal::SIGTERM);
+                                let force_pid = pid;
+                                tokio::spawn(async move {
+                                    tokio::time::sleep(Duration::from_secs(5)).await;
+                                    if group_alive(force_pid) {
+                                        let _ = killpg(Pid::from_raw(force_pid as i32), Signal::SIGKILL);
+                                    }
+                                });
+                            }
+                        }
+                    }
+                }
+            } else {
+                wait.await
+            };
             // The shell may exit before children. Clean the owned group before releasing this run.
             if group_alive(pid) {
                 let _ = killpg(Pid::from_raw(pid as i32), Signal::SIGTERM);
@@ -437,8 +641,10 @@ impl Manager {
                     return;
                 }
                 let stopped = current.state == "stopping";
-                current.error = None;
-                current.state = if stopped || (code == Some(0) && !has_health) {
+                current.error = vpn_failure.clone();
+                current.state = if vpn_failure.is_some() {
+                    "failed"
+                } else if stopped || (code == Some(0) && !has_health) {
                     "stopped"
                 } else {
                     "failed"
@@ -446,12 +652,18 @@ impl Manager {
                 .into();
                 current.exit_code = code;
                 current.pid = None;
-                if !stopped && current.state == "failed" {
+                if vpn_failure.is_none() && !stopped && current.state == "failed" {
                     current.error = Some(format!("Command exited {}. Check stderr and confirm the required tools are available in your login shell.", code.map(|n| format!("with code {n}")).unwrap_or_else(|| "after a signal".into())));
                 }
                 current.activity = format!(
                     "{} · {}",
-                    if stopped { "Stopped" } else { "Process exited" },
+                    if vpn_failure.is_some() {
+                        "VPN route stopped"
+                    } else if stopped {
+                        "Stopped"
+                    } else {
+                        "Process exited"
+                    },
                     chrono::Local::now().format("%H:%M:%S")
                 );
                 current.clone()
@@ -678,8 +890,8 @@ impl Manager {
             exited |= child.try_wait().ok().flatten().is_some();
             if current.state != "stopping" {
                 if let Some(vpn) = lease.as_ref() {
-                    if !vpn.healthy().await.unwrap_or(false) {
-                        vpn_failure=Some("VPN health or ownership was lost. The worker was stopped; reconnect the profile before restarting.".into());
+                    if !vpn.worker_safe().await.unwrap_or(false) {
+                        vpn_failure=Some("VPN gateway stopped or ownership was lost. The worker was stopped; reconnect the profile before restarting.".into());
                         if let Some(snapshot) = self
                             .store
                             .lock()
@@ -1119,6 +1331,24 @@ async fn drain(
 mod tests {
     use super::*;
     use tokio::io::AsyncWriteExt;
+
+    #[test]
+    fn destination_routes_keep_command_services_on_native_runner() {
+        let definition: ServiceDefinition = serde_json::from_value(serde_json::json!({
+            "id":"api",
+            "name":"API",
+            "cwd":".",
+            "type":"command",
+            "command":"go run .",
+            "vpnRoutes":[{
+                "profileId":"ac9c00d2-4810-43b6-a8e9-b9f07fecf6ec",
+                "remoteHost":"database.internal.example",
+                "remotePort":5432,
+                "localPort":15432
+            }]
+        })).unwrap();
+        assert!(!uses_compose_runner(&definition));
+    }
     #[tokio::test]
     async fn no_newline_flood_remains_bounded_and_preserves_utf8() {
         let logs = Arc::new(Mutex::new(LogStore::default()));
@@ -1177,6 +1407,7 @@ mod tests {
             url: None,
             depends_on: vec![],
             vpn: None,
+            vpn_routes: vec![],
         };
         manager
             .save(&project.id, definition, "absent", false)

@@ -26,6 +26,7 @@ async fn real_sdk_and_proxy_share_one_run_and_revocation_blocks_access() {
         url: None,
         depends_on: vec![],
         vpn: None,
+        vpn_routes: vec![],
     };
     manager.save(&p.id, def, "absent", false).await.unwrap();
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();

@@ -1,14 +1,21 @@
 use serde_json::Value;
 use service_manager::{
     manager::Manager,
+    mcp::AiBridge,
     model::*,
     project::{hash, secure_write},
+    proxy::{call, connect, Credentials},
     vpn::{VpnImport, VpnManager},
 };
 use std::{
+    net::{Ipv4Addr, TcpListener},
     path::{Path, PathBuf},
     process::Command,
     time::Duration,
+};
+use tokio::{
+    io::{AsyncReadExt, AsyncWriteExt},
+    net::TcpStream,
 };
 
 fn docker(args: &[&str]) -> String {
@@ -135,6 +142,37 @@ fn reachable(worker: &str) -> bool {
     result.status.success() && String::from_utf8_lossy(&result.stdout).trim() == "synthetic-ok"
 }
 
+fn free_port() -> u16 {
+    TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port()
+}
+
+async fn relay_reachable(port: u16) -> bool {
+    let Ok(Ok(mut stream)) = tokio::time::timeout(
+        Duration::from_secs(3),
+        TcpStream::connect((Ipv4Addr::LOCALHOST, port)),
+    )
+    .await
+    else {
+        return false;
+    };
+    if stream
+        .write_all(b"GET / HTTP/1.1\r\nHost: synthetic\r\nConnection: close\r\n\r\n")
+        .await
+        .is_err()
+    {
+        return false;
+    }
+    let mut response = String::new();
+    tokio::time::timeout(Duration::from_secs(3), stream.read_to_string(&mut response))
+        .await
+        .is_ok_and(|result| result.is_ok())
+        && response.contains("synthetic-ok")
+}
+
 // Explicit opt-in: creates a local synthetic OpenVPN server and only uniquely owned resources.
 #[tokio::test]
 #[ignore = "requires local Docker, OpenSSL, Gluetun v3.41.0 and alpine:3.23.3"]
@@ -184,6 +222,7 @@ async fn vpn_manager_shares_gateways_and_verifies_loss_cleanup() {
                     username: "synthetic-user".into(),
                     password: "synthetic-password".into(),
                     published_ports: vec![],
+                    outbound_subnets: vec![],
                     health_target: "10.66.0.1:5432".into(),
                     dns_address: String::new(),
                     health_icmp_target: "10.66.0.1".into(),
@@ -250,6 +289,7 @@ async fn vpn_manager_shares_gateways_and_verifies_loss_cleanup() {
                 profile_id: profile.id.clone(),
                 image: "alpine:3.23.3".into(),
             }),
+            vpn_routes: vec![],
             health_check: None,
             ports: vec![],
             url: None,
@@ -318,6 +358,28 @@ async fn vpn_manager_shares_gateways_and_verifies_loss_cleanup() {
     wait_terminal(&manager, &project.id, "a1", "stopped").await;
     assert!(reachable(&workers[1]));
     assert!(reachable(&workers[2]));
+    docker(&["pause", &cleanup.gateways[0]]);
+    let mut unhealthy = false;
+    for _ in 0..40 {
+        if docker(&[
+            "inspect",
+            "--format",
+            "{{.State.Health.Status}}",
+            &cleanup.gateways[0],
+        ]) == "unhealthy"
+        {
+            unhealthy = true;
+            break;
+        }
+        tokio::time::sleep(Duration::from_secs(1)).await;
+    }
+    assert!(unhealthy, "paused gateway must become unhealthy");
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    assert!(
+        manager.status(&project.id, "a2").await.unwrap().active(),
+        "a transiently unhealthy owned gateway must preserve its worker"
+    );
+    docker(&["unpause", &cleanup.gateways[0]]);
     docker(&["stop", "--time", "1", &cleanup.gateways[0]]);
     wait_terminal(&manager, &project.id, "a2", "failed").await;
     assert_eq!(
@@ -328,7 +390,261 @@ async fn vpn_manager_shares_gateways_and_verifies_loss_cleanup() {
     assert!(reachable(&workers[2]));
     manager.shutdown().await.unwrap();
     wait_terminal(&manager, &project.id, "b1", "stopped").await;
-    println!("synthetic VPN manager proof passed: two gateways, shared workers, run reuse, post-restart guard, verified loss cleanup and unaffected other VPN");
+    println!("synthetic VPN manager proof passed: two gateways, shared workers, transient health preservation, run reuse, post-restart guard, verified gateway-stop cleanup and unaffected other VPN");
+}
+
+#[tokio::test]
+#[ignore = "requires local Docker, OpenSSL and Gluetun v3.41.0"]
+async fn native_vpn_routes_keep_commands_on_host_and_share_gateways() {
+    let fixture = match std::env::var_os("SM_VPN_FIXTURE_DIR") {
+        Some(path) => PathBuf::from(path),
+        None => {
+            let script = Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../.agents/evidence/TASK-0018/vpn-connected-proof.py");
+            let status = Command::new("python3")
+                .arg(script)
+                .arg(std::env::current_exe().unwrap())
+                .arg("native_vpn_routes_keep_commands_on_host_and_share_gateways")
+                .status()
+                .unwrap();
+            assert!(status.success(), "synthetic native VPN relay proof failed");
+            return;
+        }
+    };
+    let server = std::env::var("SM_VPN_FIXTURE_SERVER").unwrap();
+    let state = fixture.join("state-native");
+    let root = fixture.join("project-native");
+    std::fs::create_dir(&root).unwrap();
+    let manager = Manager::new(state.clone()).unwrap();
+    let project = manager.open(root.to_str().unwrap()).await.unwrap();
+    let bridge = AiBridge::new(manager.clone(), state.clone(), free_port()).unwrap();
+    bridge.set_enabled(true).await.unwrap();
+    let created = bridge
+        .create(
+            "synthetic-vpn-client".into(),
+            vec![],
+            true,
+            true,
+            vec![],
+            std::path::PathBuf::from(env!("CARGO_BIN_EXE_service-manager")),
+        )
+        .await
+        .unwrap();
+    let client = connect(Credentials {
+        endpoint: bridge.endpoint.clone(),
+        token: created.token,
+    })
+    .await
+    .unwrap();
+    let owner = std::fs::read_to_string(state.join("vpn/owner")).unwrap();
+    let octet = 2 + uuid::Uuid::new_v4().as_bytes()[0] % 240;
+    let endpoints = [
+        format!("10.232.{octet}.2"),
+        format!("10.232.{}.2", octet + 1),
+    ];
+    let mut profiles = Vec::new();
+    for (index, name) in ["Native A", "Native B"].iter().enumerate() {
+        let config = std::fs::read_to_string(fixture.join("client.ovpn"))
+            .unwrap()
+            .replace(
+                "remote synthetic-vpn-server 1194",
+                &format!("remote {} 1194", endpoints[index]),
+            );
+        let config_path = fixture.join(format!("native-client-{index}.ovpn"));
+        secure_write(&config_path, config.as_bytes()).unwrap();
+        profiles.push(
+            manager
+                .vpns
+                .import(VpnImport {
+                    name: (*name).into(),
+                    config_path: config_path.to_str().unwrap().into(),
+                    key_passphrase: String::new(),
+                    username: "synthetic-user".into(),
+                    password: "synthetic-password".into(),
+                    published_ports: vec![],
+                    outbound_subnets: vec![],
+                    health_target: "10.66.0.1:5432".into(),
+                    dns_address: String::new(),
+                    health_icmp_target: "10.66.0.1".into(),
+                })
+                .await
+                .unwrap(),
+        );
+    }
+    let metadata: Vec<Value> =
+        serde_json::from_slice(&std::fs::read(state.join("vpn/profiles.json")).unwrap()).unwrap();
+    let mut cleanup = Cleanup {
+        stacks: vec![],
+        gateways: vec![],
+        networks: vec![],
+        server,
+    };
+    for (index, profile) in metadata.iter().enumerate() {
+        let id = profile["id"].as_str().unwrap();
+        let fingerprint = profile["fingerprint"].as_str().unwrap();
+        let name = format!("sm-vpn-{}-{id}", &owner[..8]);
+        let network = format!("{name}-net");
+        cleanup.gateways.push(name);
+        cleanup.networks.push(network.clone());
+        docker(&[
+            "network",
+            "create",
+            "--driver",
+            "bridge",
+            "--subnet",
+            &format!("10.232.{}.0/24", octet + index as u8),
+            "--label",
+            &format!("io.service-manager.vpn.owner={owner}"),
+            "--label",
+            &format!("io.service-manager.vpn.profile={id}"),
+            "--label",
+            &format!("io.service-manager.vpn.fingerprint={fingerprint}"),
+            &network,
+        ]);
+        docker(&[
+            "network",
+            "connect",
+            "--ip",
+            &endpoints[index],
+            &network,
+            &cleanup.server,
+        ]);
+    }
+    let ports = [free_port(), free_port(), free_port()];
+    for (index, id) in ["native-a1", "native-a2", "native-b1"].iter().enumerate() {
+        let profile = if index < 2 {
+            &profiles[0]
+        } else {
+            &profiles[1]
+        };
+        let command = format!(
+            "exec /usr/bin/python3 -u -c 'import urllib.request,time; print(\"vpn-worker-marker\",urllib.request.urlopen(\"http://127.0.0.1:{}\",timeout=5).read().decode(),flush=True); time.sleep(300)'",
+            ports[index]
+        );
+        let definition = ServiceDefinition {
+            id: (*id).into(),
+            name: (*id).into(),
+            cwd: ".".into(),
+            kind: ServiceKind::Command { command },
+            env_file: None,
+            health_check: None,
+            ports: vec![],
+            url: None,
+            depends_on: vec![],
+            vpn: None,
+            vpn_routes: vec![VpnRoute {
+                profile_id: profile.id.clone(),
+                remote_host: "10.66.0.1".into(),
+                remote_port: 5432,
+                local_port: ports[index],
+            }],
+        };
+        let config = call(
+            &client,
+            "get_project_config",
+            serde_json::json!({"projectId": project.id}),
+        )
+        .await
+        .unwrap();
+        call(
+            &client,
+            "upsert_service",
+            serde_json::json!({
+                "projectId": project.id,
+                "expectedRevision": config["revision"],
+                "definition": definition,
+            }),
+        )
+        .await
+        .unwrap();
+    }
+    for id in ["native-a1", "native-a2", "native-b1"] {
+        call(
+            &client,
+            "start_service",
+            serde_json::json!({"projectId": project.id, "serviceId": id}),
+        )
+        .await
+        .unwrap();
+        wait_marker(&manager, &project.id, id).await;
+        let logs = call(
+            &client,
+            "read_logs",
+            serde_json::json!({"projectId": project.id, "serviceId": id}),
+        )
+        .await
+        .unwrap();
+        assert!(logs["records"].as_array().unwrap().iter().any(|record| {
+            record["text"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("vpn-worker-marker")
+        }));
+    }
+    for port in ports {
+        assert!(
+            relay_reachable(port).await,
+            "relay {port} did not reach target"
+        );
+    }
+    assert_eq!(
+        docker(&[
+            "ps",
+            "-q",
+            "--filter",
+            &format!("label=io.service-manager.vpn.owner={owner}")
+        ])
+        .lines()
+        .count(),
+        2,
+        "only the two shared gateways should run in Docker"
+    );
+    let pid = manager
+        .status(&project.id, "native-a1")
+        .await
+        .unwrap()
+        .pid
+        .unwrap();
+    let process = Command::new("ps")
+        .args(["-p", &pid.to_string(), "-o", "comm="])
+        .output()
+        .unwrap();
+    assert!(String::from_utf8_lossy(&process.stdout).contains("Python"));
+    call(
+        &client,
+        "stop_service",
+        serde_json::json!({"projectId": project.id, "serviceId": "native-a1"}),
+    )
+    .await
+    .unwrap();
+    wait_terminal(&manager, &project.id, "native-a1", "stopped").await;
+    for _ in 0..20 {
+        if TcpStream::connect((Ipv4Addr::LOCALHOST, ports[0]))
+            .await
+            .is_err()
+        {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    assert!(TcpStream::connect((Ipv4Addr::LOCALHOST, ports[0]))
+        .await
+        .is_err());
+    assert!(relay_reachable(ports[1]).await);
+    assert!(relay_reachable(ports[2]).await);
+    docker(&["stop", "--time", "1", &cleanup.gateways[0]]);
+    wait_terminal(&manager, &project.id, "native-a2", "failed").await;
+    assert!(manager
+        .status(&project.id, "native-b1")
+        .await
+        .unwrap()
+        .active());
+    assert!(relay_reachable(ports[2]).await);
+    manager.shutdown().await.unwrap();
+    wait_terminal(&manager, &project.id, "native-b1", "stopped").await;
+    bridge.set_enabled(false).await.unwrap();
+    let _ = client.cancel().await;
+    println!("native VPN relay proof passed: native processes, two isolated profiles, shared gateway, loopback cleanup and fail-closed gateway loss");
 }
 
 #[tokio::test]
@@ -393,6 +709,7 @@ async fn vpn_manager_uses_certificate_only_encrypted_key() {
                         "synthetic-wrong-passphrase".into()
                     },
                     published_ports: vec![],
+                    outbound_subnets: vec![],
                     health_target: "10.66.0.1:5432".into(),
                     dns_address: String::new(),
                     health_icmp_target: "10.66.0.1".into(),
@@ -469,6 +786,7 @@ async fn vpn_manager_uses_certificate_only_encrypted_key() {
             profile_id: profiles[0].id.clone(),
             image: "alpine:3.23.3".into(),
         }),
+        vpn_routes: vec![],
         health_check: None,
         ports: vec![],
         url: None,
@@ -597,6 +915,7 @@ async fn vpn_manager_handles_real_crv1_mfa() {
                         String::new()
                     },
                     published_ports: vec![],
+                    outbound_subnets: vec![],
                     health_target: format!("10.{}.0.1:5432", if index == 0 { 66 } else { 67 }),
                     dns_address: String::new(),
                     health_icmp_target: format!("10.{}.0.1", if index == 0 { 66 } else { 67 }),
@@ -658,6 +977,7 @@ async fn vpn_manager_handles_real_crv1_mfa() {
                 profile_id: profiles[index].id.clone(),
                 image: "alpine:3.23.3".into(),
             }),
+            vpn_routes: vec![],
             health_check: None,
             ports: vec![],
             url: None,

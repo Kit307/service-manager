@@ -6,6 +6,25 @@ import "../styles/vpn.css";
 
 const gatewayImage = "qmcgaw/gluetun:v3.41.0";
 
+function parsePorts(value: string) {
+  const parts = value.trim() ? value.split(",").map((part) => part.trim()) : [];
+  const publishedPorts: VpnPortMapping[] = [];
+  for (const part of parts) {
+    const match = /^(\d+):(\d+)$/.exec(part);
+    if (!match || match.slice(1).some((item) => Number(item) < 1 || Number(item) > 65535)) {
+      throw new Error("Use HOST:CONTAINER ports from 1 to 65535, separated by commas.");
+    }
+    publishedPorts.push({ host: Number(match[1]), container: Number(match[2]) });
+  }
+  if (publishedPorts.length > 32 || new Set(publishedPorts.map((port) => port.host)).size !== publishedPorts.length || new Set(publishedPorts.map((port) => port.container)).size !== publishedPorts.length) {
+    throw new Error("Use up to 32 unique host and container ports.");
+  }
+  if (publishedPorts.some((port) => [53, 8000, 9999, 11940].includes(port.container))) {
+    throw new Error("Container ports 53, 8000, 9999 and 11940 are reserved for VPN DNS, control, health and authentication.");
+  }
+  return publishedPorts;
+}
+
 export function VpnSettings({ profiles, projects, onRefresh }: {
   profiles: VpnProfile[];
   projects: Project[];
@@ -42,21 +61,9 @@ export function VpnSettings({ profiles, projects, onRefresh }: {
   }
 
   async function importProfile() {
-    const parts = ports.trim() ? ports.split(",").map((part) => part.trim()) : [];
-    const publishedPorts: VpnPortMapping[] = [];
-    for (const part of parts) {
-      const match = /^(\d+):(\d+)$/.exec(part);
-      if (!match || match.slice(1).some((value) => Number(value) < 1 || Number(value) > 65535)) {
-        setFormError("Use HOST:CONTAINER ports from 1 to 65535, separated by commas."); return;
-      }
-      publishedPorts.push({ host: Number(match[1]), container: Number(match[2]) });
-    }
-    if (publishedPorts.length > 32 || new Set(publishedPorts.map((port) => port.host)).size !== publishedPorts.length || new Set(publishedPorts.map((port) => port.container)).size !== publishedPorts.length) {
-      setFormError("Use up to 32 unique host and container ports."); return;
-    }
-    if (publishedPorts.some((port) => [53, 8000, 9999, 11940].includes(port.container))) {
-      setFormError("Container ports 53, 8000, 9999 and 11940 are reserved for VPN DNS, control, health and authentication."); return;
-    }
+    let publishedPorts: VpnPortMapping[];
+    try { publishedPorts = parsePorts(ports); }
+    catch (cause) { setFormError(cause instanceof Error ? cause.message : "Invalid published ports."); return; }
     if (!name.trim() || !configPath || (authMode === "password" && (!username.trim() || !password))) {
       setFormError("Choose an .ovpn file and enter a name and the credentials required by the selected authentication method."); return;
     }
@@ -85,7 +92,7 @@ export function VpnSettings({ profiles, projects, onRefresh }: {
     <div className="ai-heading">
       <span className="welcome-icon small"><Icon name="shield" size={24} /></span>
       <h1>Shared Docker VPN</h1>
-      <p>Selected Linux service containers share a profile’s tunnel. Separate profiles can connect together. Your Mac stays off VPN.</p>
+      <p>Native services use explicit loopback TCP routes through shared gateways. Separate profiles can connect together while your Mac stays off VPN.</p>
     </div>
     {error && <p className="runtime-error" role="alert">{error}</p>}
     {status && <p role="status">{status}</p>}
@@ -121,6 +128,7 @@ export function VpnSettings({ profiles, projects, onRefresh }: {
             </div>
           </div>
           <p>{profile.publishedPorts.length ? profile.publishedPorts.map((port) => `127.0.0.1:${port.host} → ${port.container}`).join(", ") : "No published host ports"}</p>
+          <VpnNetworkEditor profile={profile} busy={lifecycleBusy} onSave={(publishedPorts, outboundSubnets) => performProfile(profile.id, () => api.updateVpnNetwork(profile.id, publishedPorts, outboundSubnets))} />
           <p>DNS: {profile.dnsAddress || "Gluetun default"} · ICMP health: {profile.healthIcmpTarget || "VPN server (0.0.0.0)"}</p>
           {profile.state === "authRequired" && profile.authChallenge && <VpnChallenge
             key={profile.authChallenge.id}
@@ -171,6 +179,32 @@ export function VpnSettings({ profiles, projects, onRefresh }: {
       {formError && <p className="field-error" role="alert">{formError}</p>}
       <button className="primary" disabled={busy}>{busy ? "Working…" : "Import profile"}</button>
     </form>
+  </div>;
+}
+
+function VpnNetworkEditor({ profile, busy, onSave }: {
+  profile: VpnProfile;
+  busy: boolean;
+  onSave: (ports: VpnPortMapping[], outboundSubnets: string[]) => Promise<void>;
+}) {
+  const [value, setValue] = useState(profile.publishedPorts.map((port) => `${port.host}:${port.container}`).join(", "));
+  const [subnets, setSubnets] = useState(profile.outboundSubnets.join(", "));
+  const [error, setError] = useState("");
+  const editable = profile.state === "disconnected" && profile.users.length === 0;
+  return <div className="vpn-port-editor">
+    <label>Published ports
+      <input className="mono" disabled={busy || !editable} value={value} placeholder="3000:3000, 8080:8080" onChange={(event) => { setValue(event.target.value); setError(""); }} />
+    </label>
+    <label>Local outbound CIDRs
+      <input className="mono" disabled={busy || !editable} value={subnets} placeholder="192.168.5.0/24" onChange={(event) => { setSubnets(event.target.value); setError(""); }} />
+      <small>Private IPv4 routes only. Workers keep all other traffic inside the VPN firewall.</small>
+    </label>
+    <button type="button" className="secondary" disabled={busy || !editable} onClick={() => {
+      try { void onSave(parsePorts(value), subnets.trim() ? subnets.split(",").map((subnet) => subnet.trim()) : []); }
+      catch (cause) { setError(cause instanceof Error ? cause.message : "Invalid network settings."); }
+    }}>Save network</button>
+    {!editable && <small>Stop its services and disconnect this VPN before changing network access.</small>}
+    {error && <small className="field-error" role="alert">{error}</small>}
   </div>;
 }
 

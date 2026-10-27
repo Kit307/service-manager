@@ -1,5 +1,6 @@
 export type ServiceState =
   "stopped" | "starting" | "running" | "ready" | "stopping" | "failed";
+export type VpnRoute = { profileId: string; remoteHost: string; remotePort: number; localPort: number };
 export type ServiceDefinition = {
   id: string;
   name: string;
@@ -9,7 +10,7 @@ export type ServiceDefinition = {
   ports?: number[];
   url?: string;
   dependsOn?: ServiceRef[];
-} & ({ type: "command"; command: string; vpn?: { profileId: string; image: string } } | { type: "compose"; file: string });
+} & ({ type: "command"; command: string; vpn?: { profileId: string; image: string }; vpnRoutes?: VpnRoute[] } | { type: "compose"; file: string });
 export type Snapshot = {
   state: ServiceState;
   runId?: string;
@@ -56,8 +57,8 @@ export type AiStatus = {
   error?: string;
 };
 export type VpnPortMapping = { host: number; container: number };
-export type VpnImport = { name: string; configPath: string; username: string; password: string; keyPassphrase?: string; publishedPorts: VpnPortMapping[]; healthTarget: string; dnsAddress?: string; healthIcmpTarget?: string };
-export type VpnProfile = { id: string; name: string; publishedPorts: VpnPortMapping[]; healthTarget: string; dnsAddress?: string; healthIcmpTarget?: string; state: string; authChallenge?: { id: string; prompt: string } | null; error?: string | null; users: ServiceRef[] };
+export type VpnImport = { name: string; configPath: string; username: string; password: string; keyPassphrase?: string; publishedPorts: VpnPortMapping[]; outboundSubnets?: string[]; healthTarget: string; dnsAddress?: string; healthIcmpTarget?: string };
+export type VpnProfile = { id: string; name: string; publishedPorts: VpnPortMapping[]; outboundSubnets: string[]; healthTarget: string; dnsAddress?: string; healthIcmpTarget?: string; state: string; authChallenge?: { id: string; prompt: string } | null; error?: string | null; users: ServiceRef[] };
 export type Workspace = {
   vpns?: VpnProfile[];
   projects: Project[];

@@ -1,6 +1,5 @@
 import { useState } from "react";
 import type { ServiceDefinition, VpnProfile } from "../lib/types";
-import { api, errorMessage } from "../lib/api";
 import type { ServiceEntry } from "../lib/workspace";
 import "../styles/operations.css";
 import "../styles/vpn.css";
@@ -25,11 +24,16 @@ export function ServiceEditor({
   onCancel: () => void;
   onRemove?: () => void;
 }) {
-  const [profileId, setProfileId] = useState(service?.type === "command" ? service.vpn?.profileId ?? "" : "");
-  const [image, setImage] = useState(service?.type === "command" ? service.vpn?.image ?? "" : "");
-  const [pulling, setPulling] = useState(false);
-  const [imageError, setImageError] = useState("");
-  const [imageStatus, setImageStatus] = useState("");
+  const [vpnRoutes, setVpnRoutes] = useState(() =>
+    service?.type === "command"
+      ? (service.vpnRoutes ?? []).map((route) => ({
+          profileId: route.profileId,
+          remoteHost: route.remoteHost,
+          remotePort: String(route.remotePort),
+          localPort: String(route.localPort),
+        }))
+      : [],
+  );
   const [name, setName] = useState(service?.name ?? "");
   const [id, setId] = useState(service?.id ?? "");
   const [type, setType] = useState(service?.type ?? "command");
@@ -47,6 +51,7 @@ export function ServiceEditor({
   const [dependsOn, setDependsOn] = useState(service?.dependsOn ?? []);
   const [portsError, setPortsError] = useState("");
   const [urlError, setUrlError] = useState("");
+  const [vpnRouteError, setVpnRouteError] = useState("");
   return (
     <form
       className="service-form"
@@ -72,7 +77,26 @@ export function ServiceEditor({
           }
         }
         setUrlError(invalidUrl ? "Use a loopback HTTP/HTTPS URL without credentials." : "");
-        if (invalidPorts || invalidUrl) return;
+        const parsedRoutes = vpnRoutes.map((route) => ({
+          profileId: route.profileId,
+          remoteHost: route.remoteHost.trim(),
+          remotePort: Number(route.remotePort),
+          localPort: Number(route.localPort),
+        }));
+        const savedProfileIds = new Set(
+          service?.type === "command"
+            ? service.vpnRoutes?.map((route) => route.profileId) ?? []
+            : [],
+        );
+        const invalidRoutes = parsedRoutes.some((route) =>
+          (!vpnProfiles.some((profile) => profile.id === route.profileId) &&
+            !savedProfileIds.has(route.profileId)) ||
+          !/^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$/.test(route.remoteHost) ||
+          !Number.isInteger(route.remotePort) || route.remotePort < 1 || route.remotePort > 65535 ||
+          !Number.isInteger(route.localPort) || route.localPort < 1 || route.localPort > 65535
+        ) || new Set(parsedRoutes.map((route) => route.localPort)).size !== parsedRoutes.length;
+        setVpnRouteError(invalidRoutes ? "Choose a VPN, valid hostname, unique local port, and TCP ports from 1 to 65535." : "");
+        if (invalidPorts || invalidUrl || invalidRoutes) return;
         const common = {
           id,
           name: name.trim(),
@@ -85,7 +109,7 @@ export function ServiceEditor({
         };
         onSave(
           type === "command"
-            ? { ...common, type, command: command.trim(), ...(profileId ? { vpn: { profileId, image: image.trim() } } : {}) }
+            ? { ...common, type, command: command.trim(), ...(parsedRoutes.length ? { vpnRoutes: parsedRoutes } : {}) }
             : { ...common, type, file: file.trim() },
         );
       }}
@@ -164,7 +188,7 @@ export function ServiceEditor({
             onChange={(e) => setCommand(e.target.value)}
           />
           <small>
-            {profileId ? "Runs in a Linux container through the selected VPN. Edit host-specific absolute paths and commands for Linux." : "Runs with your login shell. Use foreground, noninteractive commands."}
+            Runs with your login shell. Use foreground, noninteractive commands.
           </small>
         </label>
       ) : (
@@ -184,31 +208,29 @@ export function ServiceEditor({
       )}
       {type === "command" && <fieldset className="vpn-options">
         <legend>Network</legend>
-        <label>VPN profile
-          <select value={profileId} onChange={(event) => {
-            setProfileId(event.target.value);
-            if (event.target.value && !image) setImage("node:22-bookworm-slim");
-          }}>
-            <option value="">None · Native on this Mac</option>
-            {profileId && !vpnProfiles.some((profile) => profile.id === profileId) && <option value={profileId} disabled>Unavailable profile ({profileId})</option>}
-            {vpnProfiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.name} · {profile.state}</option>)}
-          </select>
-        </label>
-        {profileId && <>
-          <label>Linux runtime image
-            <input required disabled={pulling} className="mono" value={image} placeholder="node:22-bookworm-slim" onChange={(event) => { setImage(event.target.value); setImageError(""); setImageStatus(""); }} />
+        <small>The service command still runs natively. Point only the matching app endpoint at 127.0.0.1 and its local relay port.</small>
+        {vpnRoutes.map((route, index) => <fieldset className="vpn-route" key={index}>
+          <legend>VPN route {index + 1}</legend>
+          <label>VPN profile {index + 1}
+            <select value={route.profileId} onChange={(event) => setVpnRoutes((routes) => routes.map((entry, current) => current === index ? { ...entry, profileId: event.target.value } : entry))}>
+              <option value="">Choose VPN</option>
+              {route.profileId && !vpnProfiles.some((profile) => profile.id === route.profileId) && <option value={route.profileId} disabled>Unavailable profile ({route.profileId})</option>}
+              {vpnProfiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.name} · {profile.state}</option>)}
+            </select>
           </label>
-          <small>Use an image with your runtime, such as node:22-bookworm-slim or golang:1.24-bookworm. The working folder is mounted in Linux; Mac absolute paths do not work. Bind the service to 0.0.0.0. Configure published host ports on the VPN page; Ports below only inspect host listeners.</small>
-          <button type="button" className="secondary" disabled={pulling || !image.trim()} onClick={async () => {
-            setPulling(true); setImageError(""); setImageStatus("");
-            try { await api.pullContainerImage(image.trim()); setImageStatus("Runtime image is ready locally."); }
-            catch (error) { setImageError(errorMessage(error)); }
-            finally { setPulling(false); }
-          }}>{pulling ? "Downloading image…" : "Download runtime image"}</button>
-          <small>Images must exist locally before running. Downloads only start when you request them.</small>
-          {imageError && <small className="field-error" role="alert">{imageError}</small>}
-          {imageStatus && <small role="status">{imageStatus}</small>}
-        </>}
+          <label>Destination host {index + 1}
+            <input className="mono" value={route.remoteHost} placeholder="database.internal.example" onChange={(event) => setVpnRoutes((routes) => routes.map((entry, current) => current === index ? { ...entry, remoteHost: event.target.value } : entry))} />
+          </label>
+          <label>Remote port {index + 1}
+            <input className="mono" inputMode="numeric" value={route.remotePort} placeholder="5432" onChange={(event) => setVpnRoutes((routes) => routes.map((entry, current) => current === index ? { ...entry, remotePort: event.target.value } : entry))} />
+          </label>
+          <label>Local port {index + 1}
+            <input className="mono" inputMode="numeric" value={route.localPort} placeholder="15432" onChange={(event) => setVpnRoutes((routes) => routes.map((entry, current) => current === index ? { ...entry, localPort: event.target.value } : entry))} />
+          </label>
+          <button type="button" className="secondary" aria-label={`Remove VPN route ${index + 1}`} onClick={() => setVpnRoutes((routes) => routes.filter((_, current) => current !== index))}>Remove</button>
+        </fieldset>)}
+        <button type="button" className="secondary" onClick={() => setVpnRoutes((routes) => [...routes, { profileId: vpnProfiles[0]?.id ?? "", remoteHost: "", remotePort: "", localPort: "" }])}>Add VPN route</button>
+        {vpnRouteError && <small className="field-error" role="alert">{vpnRouteError}</small>}
       </fieldset>}
       <label>
         Working directory

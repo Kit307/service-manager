@@ -17,6 +17,7 @@ async fn main() {
         },
         env_file: None,
         vpn: None,
+        vpn_routes: vec![],
         health_check: None,
         ports: vec![],
         url: None,

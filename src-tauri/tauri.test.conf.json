@@ -1,0 +1,25 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Service Manager Test",
+  "identifier": "dev.servicemanager.desktop.test",
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "Service Manager Test",
+        "width": 1200,
+        "height": 820,
+        "minWidth": 900,
+        "minHeight": 600,
+        "minimizable": false,
+        "resizable": true,
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true,
+        "transparent": true
+      }
+    ]
+  },
+  "bundle": {
+    "active": false
+  }
+}

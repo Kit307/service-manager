@@ -3,7 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 import { ask, open } from "@tauri-apps/plugin-dialog";
 import type {
   AiStatus,
-  VpnImport, VpnProfile,
+  VpnImport, VpnPortMapping, VpnProfile,
   LogPage,
   Project,
   ServiceDefinition,
@@ -44,6 +44,7 @@ export async function pickVpnConfig() {
 export const api = {
   listVpnProfiles: (): Promise<VpnProfile[]> => invoke("list_vpn_profiles", {}),
   importVpnProfile: (input: VpnImport): Promise<VpnProfile> => invoke("import_vpn_profile", { input }),
+  updateVpnNetwork: (id: string, publishedPorts: VpnPortMapping[], outboundSubnets: string[]): Promise<VpnProfile> => invoke("update_vpn_network", { id, publishedPorts, outboundSubnets }),
   connectVpn: (id: string): Promise<VpnProfile> => invoke("connect_vpn", { id }),
   respondVpnChallenge: (id: string, challengeId: string, response: string): Promise<void> => invoke("respond_vpn_challenge", { id, challengeId, response }),
   disconnectVpn: (id: string): Promise<void> => invoke("disconnect_vpn", { id }),

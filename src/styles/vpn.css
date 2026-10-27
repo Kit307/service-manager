@@ -11,6 +11,13 @@
 .vpn-options { display: grid; gap: 12px; margin-bottom: 24px; border: 1px solid var(--line); border-radius: 8px; padding: 16px; }
 .vpn-options > small { color: var(--muted); font-size: 11px; line-height: 1.6; }
 .vpn-options > button { justify-self: start; }
+.vpn-route { display: grid; grid-template-columns: 1.2fr 1.4fr .7fr .7fr auto; gap: 10px; align-items: end; border: 1px solid var(--line); border-radius: 8px; padding: 12px; }
+.vpn-route > legend { padding: 0 6px; color: var(--muted); font-size: 11px; }
+.vpn-route > button { margin-bottom: 1px; }
 
 .vpn-challenge { display: grid; gap: 12px; margin: 16px 0; padding: 16px; border: 1px solid var(--line); border-radius: 8px; }
 .vpn-challenge > button { justify-self: start; }
+.vpn-port-editor { display: grid; grid-template-columns: minmax(220px, 1fr) auto; align-items: end; gap: 12px; margin: 12px 0; }
+.vpn-port-editor > small { grid-column: 1 / -1; }
+@media (max-width: 900px) { .vpn-route { grid-template-columns: 1fr 1fr; } }
+@media (max-width: 640px) { .vpn-port-editor, .vpn-route { grid-template-columns: 1fr; } }

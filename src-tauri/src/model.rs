@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 use std::path::Path;
 
 #[derive(Debug, Serialize, Clone)]
@@ -47,6 +48,49 @@ pub enum ServiceKind {
 pub struct VpnService {
     pub profile_id: String,
     pub image: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct VpnRoute {
+    pub profile_id: String,
+    pub remote_host: String,
+    pub remote_port: u16,
+    pub local_port: u16,
+}
+
+fn validate_vpn_routes(kind: &ServiceKind, routes: &[VpnRoute]) -> Result<()> {
+    if routes.is_empty() {
+        return Ok(());
+    }
+    if !matches!(kind, ServiceKind::Command { .. }) || routes.len() > 32 {
+        return Err(AppError::new(
+            "CONFIG_INVALID",
+            "Use up to 32 VPN routes on command services only.",
+        ));
+    }
+    let mut local_ports = HashSet::new();
+    for route in routes {
+        let host = route.remote_host.as_str();
+        if uuid::Uuid::parse_str(&route.profile_id).is_err()
+            || route.remote_port == 0
+            || route.local_port == 0
+            || !local_ports.insert(route.local_port)
+            || host.is_empty()
+            || host.len() > 253
+            || host.starts_with(['.', '-'])
+            || host.ends_with(['.', '-'])
+            || !host
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'_'))
+        {
+            return Err(AppError::new(
+                "CONFIG_INVALID",
+                "VPN routes require a valid profile, hostname, nonzero ports, and distinct local ports.",
+            ));
+        }
+    }
+    Ok(())
 }
 pub fn validate_vpn_image(image: &str) -> Result<()> {
     if image.is_empty()
@@ -97,6 +141,8 @@ pub struct ServiceDefinition {
     pub depends_on: Vec<crate::project::ServiceRef>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub vpn: Option<VpnService>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub vpn_routes: Vec<VpnRoute>,
 }
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -116,6 +162,8 @@ struct ServiceWire {
     #[serde(default)]
     depends_on: Vec<crate::project::ServiceRef>,
     vpn: Option<VpnService>,
+    #[serde(default)]
+    vpn_routes: Vec<VpnRoute>,
 }
 impl TryFrom<ServiceWire> for ServiceDefinition {
     type Error = String;
@@ -126,6 +174,10 @@ impl TryFrom<ServiceWire> for ServiceDefinition {
             _ => return Err("Choose command with command text, or compose with a file; unknown and mixed fields are not supported.".into()),
         };
         validate_vpn(&kind, &w.vpn).map_err(|e| e.message)?;
+        validate_vpn_routes(&kind, &w.vpn_routes).map_err(|e| e.message)?;
+        if w.vpn.is_some() && !w.vpn_routes.is_empty() {
+            return Err("Choose either the legacy VPN worker or native VPN routes, not both.".into());
+        }
         Ok(Self {
             id: w.id,
             name: w.name,
@@ -137,6 +189,7 @@ impl TryFrom<ServiceWire> for ServiceDefinition {
             url: w.url,
             depends_on: w.depends_on,
             vpn: w.vpn,
+            vpn_routes: w.vpn_routes,
         })
     }
 }

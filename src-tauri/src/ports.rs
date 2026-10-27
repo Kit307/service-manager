@@ -26,6 +26,7 @@ pub struct PortListener {
 }
 pub fn configured_ports(definition: &ServiceDefinition) -> Vec<u16> {
     let mut ports: BTreeSet<_> = definition.ports.iter().copied().collect();
+    ports.extend(definition.vpn_routes.iter().map(|route| route.local_port));
     for address in definition
         .url
         .iter()

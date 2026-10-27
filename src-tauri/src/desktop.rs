@@ -4,7 +4,7 @@ use crate::{
     mcp::AiBridge,
     model::*,
     project::{Project, ServiceRef, WorkspaceGroup},
-    vpn::{VpnImport, VpnProfileView},
+    vpn::{VpnImport, VpnPortMapping, VpnProfileView},
 };
 use serde_json::{json, Value};
 use std::sync::{
@@ -93,6 +93,23 @@ async fn import_vpn_profile(state: State<'_, DesktopState>, input: VpnImport) ->
 async fn connect_vpn(state: State<'_, DesktopState>, id: String) -> Result<VpnProfileView> {
     allow_vpn_change(&state)?;
     let profile = state.manager.vpns.connect(&id).await?;
+    let mut cached = state.vpn_profiles.lock().await;
+    cached.retain(|entry| entry.id != id);
+    cached.push(profile.clone());
+    Ok(profile)
+}
+#[tauri::command]
+async fn update_vpn_network(
+    state: State<'_, DesktopState>,
+    id: String,
+    published_ports: Vec<VpnPortMapping>,
+    outbound_subnets: Vec<String>,
+) -> Result<VpnProfileView> {
+    allow_vpn_change(&state)?;
+    let profile = state
+        .manager
+        .update_vpn_network(&id, published_ports, outbound_subnets)
+        .await?;
     let mut cached = state.vpn_profiles.lock().await;
     cached.retain(|entry| entry.id != id);
     cached.push(profile.clone());
@@ -386,6 +403,21 @@ async fn revoke_client(state: State<'_, DesktopState>, id: String) -> Result<()>
     state.ai.revoke(&id).await
 }
 
+fn configured_mcp_port(value: Option<std::ffi::OsString>) -> Result<u16> {
+    value.map_or(Ok(47831), |value| {
+        value
+            .to_str()
+            .and_then(|value| value.parse::<u16>().ok())
+            .filter(|port| *port != 0)
+            .ok_or_else(|| {
+                AppError::new(
+                    "CONFIG_INVALID",
+                    "SERVICE_MANAGER_MCP_PORT must be a TCP port from 1 to 65535.",
+                )
+            })
+    })
+}
+
 pub fn run() {
     let app = tauri::Builder::default()
         .menu(|app| {
@@ -423,7 +455,11 @@ pub fn run() {
                 .map(std::path::PathBuf::from)
                 .unwrap_or(app.path().app_data_dir()?);
             let manager = Manager::new(dir.clone())?;
-            let ai = AiBridge::new(manager.clone(), dir, 47831)?;
+            let ai = AiBridge::new(
+                manager.clone(),
+                dir,
+                configured_mcp_port(std::env::var_os("SERVICE_MANAGER_MCP_PORT"))?,
+            )?;
             app.manage(DesktopState {
                 manager,
                 ai,
@@ -500,6 +536,7 @@ pub fn run() {
             workspace,
             list_vpn_profiles,
             import_vpn_profile,
+            update_vpn_network,
             connect_vpn,
             respond_vpn_challenge,
             disconnect_vpn,
@@ -557,4 +594,17 @@ pub fn run() {
             _ => {}
         }
     });
+}
+
+#[cfg(test)]
+mod test_app_config_tests {
+    use super::*;
+
+    #[test]
+    fn accepts_a_separate_test_mcp_port_and_rejects_invalid_values() {
+        assert_eq!(configured_mcp_port(Some("47832".into())).unwrap(), 47832);
+        assert_eq!(configured_mcp_port(None).unwrap(), 47831);
+        assert!(configured_mcp_port(Some("0".into())).is_err());
+        assert!(configured_mcp_port(Some("not-a-port".into())).is_err());
+    }
 }

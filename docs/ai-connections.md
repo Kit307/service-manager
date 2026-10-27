@@ -96,7 +96,7 @@ Install the bundled [Service Manager skill](service-manager-skill.md) to teach c
 
 ## Docker VPN discovery (v0.8.0)
 
-`list_vpn_profiles {}` returns public profile metadata as `{profiles: [...]}` without credentials, imported config or gateway logs. Use its IDs for an explicitly requested command-service `vpn: {profileId, image}` field through revision-checked `upsert_service`. Credential import, Connect, Disconnect, Remove and image downloads are desktop actions. No VPN mutation MCP tools or new proxy commands are exposed. See [shared Docker VPN](docker-vpn.md) for Linux runtime, central port mappings and private-only TCP health setup.
+`list_vpn_profiles {}` returns public profile metadata as `{profiles: [...]}` without credentials, imported config or gateway logs. Use its IDs for an explicitly requested command-service `vpnRoutes: [{profileId, remoteHost, remotePort, localPort}]` field through revision-checked `upsert_service`. The command remains native and must be configured to use the loopback endpoint. Credential import, Connect, Disconnect, Remove and image downloads are desktop actions. No VPN mutation MCP tools or new proxy commands are exposed. See [shared Docker VPN](docker-vpn.md) for routing and limits.
 
 ### Interactive VPN authentication (v0.8.2)
 
