@@ -1,7 +1,7 @@
 /* Native glass blurs the desktop; these rims give controls their own clear edge. */
 :root {
   --control-glass: color-mix(in srgb, var(--canvas) 14%, transparent);
-  --control-glass-hover: var(--hover);
+  --control-glass-hover: color-mix(in srgb, var(--canvas) 28%, transparent);
   --control-rim: color-mix(in srgb, var(--glass-highlight) 80%, transparent);
   --control-edge: color-mix(in srgb, var(--ink) 12%, transparent);
   --control-depth: 0 3px 8px rgb(0 0 0 / 7%),
@@ -96,7 +96,7 @@ button:disabled {
 .segmented button.selected,
 .tiny.active {
   color: var(--selected-ink);
-  background: var(--selected);
+  background: var(--control-glass-hover);
   border-color: var(--control-rim);
   box-shadow: var(--control-depth);
 }
@@ -121,7 +121,7 @@ button:disabled {
 }
 
 :is(.command-display, .group-service-card, .service-icon, .welcome-icon, .endpoint) {
-  background: var(--ops-panel-solid);
+  background: var(--control-glass);
   border: 1px solid var(--control-rim);
   border-radius: 16px;
   box-shadow: var(--control-depth),
@@ -132,7 +132,7 @@ button:disabled {
 
 .service-row.selected,
 .ai-nav.selected {
-  background: var(--selected);
+  background: var(--control-glass-hover);
   border-radius: 12px;
   box-shadow: var(--control-depth), inset 0 0 0 1px var(--control-rim);
 }
@@ -151,7 +151,7 @@ button:disabled {
 }
 
 .run-list > button[aria-pressed="true"] {
-  background: var(--selected);
+  background: var(--control-glass-hover);
   border-color: var(--selected-ink);
   box-shadow: var(--control-depth);
 }

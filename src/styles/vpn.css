@@ -23,5 +23,3 @@
 @media (max-width: 640px) { .vpn-port-editor, .vpn-route { grid-template-columns: 1fr; } }
 
 .vpn-import .form-section { max-width: 100%; }
-.vpn-profile, .vpn-challenge, .vpn-route { border-color: var(--ops-rim); }
-.vpn-challenge, .vpn-route { border-radius: var(--ops-radius-sm); }

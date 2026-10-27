@@ -1,26 +1,3 @@
-.ops-console {
-  --surface: var(--ops-console);
-  --bg: var(--ops-console);
-  --log-bg: var(--ops-console);
-  --ink: var(--ops-console-ink);
-  --muted: #b3c1d0;
-  --subtle: #a4b5c7;
-  --line: #435364;
-  --hover: #273746;
-  --selected: #34495c;
-  --selected-ink: #f4f8fc;
-  --red: #ff9f9f;
-  --amber: #f4ca78;
-  --green: #8cdbac;
-  color: var(--ops-console-ink);
-  background: var(--ops-console);
-}
-.ops-console .log-toolbar,
-.ops-console .log-filters,
-.ops-console .log-viewport,
-.ops-console .log-status { background: var(--ops-console); }
-.ops-console .search-input input { color: var(--ops-console-ink); }
-.ops-console .log-line time, .ops-console .log-count, .ops-console .log-status { font-variant-numeric: tabular-nums; }
 .log-panel-compact .log-toolbar {
   gap: 8px;
   min-height: 44px;
