@@ -124,6 +124,8 @@ export function AiConnections({
         }}
       >
         <h2>Create a client profile</h2>
+        <section className="form-section" aria-labelledby="ai-connection-settings-heading">
+        <h2 id="ai-connection-settings-heading">Connection settings</h2>
         <label>
           Client name
           <input
@@ -138,6 +140,8 @@ export function AiConnections({
           commands anywhere your user account allows. No additional folder grants
           are needed. macOS privacy permissions still apply. Keep this token private.
         </p>
+        </section>
+        <div className="form-actions" role="group" aria-label="Form actions">
         <button
           className="primary"
           disabled={busy || !workspace.ai.enabled || !name.trim()}
@@ -145,6 +149,7 @@ export function AiConnections({
           <Icon name="plus" />
           Create profile & proxy
         </button>
+        </div>
       </form>
       {credential && (
         <section className="settings-section credential">

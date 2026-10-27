@@ -29,6 +29,8 @@ async function fillImport() {
 it("validates ports and private TLS endpoint before importing, then clears credentials", async () => {
   const refresh = vi.fn();
   render(<VpnSettings profiles={[]} projects={[]} onRefresh={refresh} />);
+  expect(screen.getByRole("region", { name: "Connection settings" })).toBeVisible();
+  expect(screen.getByRole("group", { name: "Form actions" })).toBeVisible();
   await fillImport();
   const ports = screen.getByLabelText(/Published ports/);
   await userEvent.type(ports, "3000:8080,3000:9000");

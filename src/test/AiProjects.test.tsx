@@ -41,6 +41,8 @@ it("creates a full-access token without choosing projects or roots", async () =>
       onError={vi.fn()}
     />,
   );
+  expect(screen.getByRole("region", { name: "Connection settings" })).toBeVisible();
+  expect(screen.getByRole("group", { name: "Form actions" })).toBeVisible();
   expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
   await user.click(
     screen.getByRole("button", { name: "Create profile & proxy" }),

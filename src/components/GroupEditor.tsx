@@ -35,6 +35,7 @@ export function GroupEditor({
           A group organizes services in this app. It does not create a folder on
           disk or change AI permissions.
         </p>
+        <section className="form-section" aria-label="Group configuration">
         <label>
           Group name
           <input
@@ -81,7 +82,8 @@ export function GroupEditor({
             <p>Add services first, or save an empty group.</p>
           )}
         </fieldset>
-        <div className="button-row">
+        </section>
+        <div className="button-row form-actions" role="group" aria-label="Form actions">
           <button className="primary" disabled={busy || !name.trim()}>
             <Icon name="check" />
             {group ? "Save group" : "Create group"}

@@ -247,7 +247,7 @@ it("keeps clicks as selection and cancels a drag with Escape", async () => {
   fireEvent.pointerUp(row, { clientX: 11, clientY: 11 });
   expect(api.moveService).not.toHaveBeenCalled();
   fireEvent.click(row);
-  expect(screen.getByRole("button", { name: "Output" })).toBeVisible();
+  expect(screen.getByRole("tab", { name: "Output" })).toBeVisible();
   fireEvent.pointerDown(row, { button: 0, clientX: 10, clientY: 10 });
   fireEvent.pointerMove(row, { clientX: 50, clientY: 50 });
   fireEvent.keyDown(row, { key: "Escape" });

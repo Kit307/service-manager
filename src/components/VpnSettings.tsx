@@ -148,6 +148,8 @@ export function VpnSettings({ profiles, projects, onRefresh }: {
     <form className="settings-section vpn-import" onSubmit={(event) => { event.preventDefault(); void importProfile(); }}>
       <h2>Import an OpenVPN profile</h2>
       <p>Imported configuration, credentials and any private key passphrase are stored privately by the app, outside project files. The .ovpn must include inline certificates and keys. Dynamic OpenVPN PIN challenges appear below the connecting profile. Browser SSO is unsupported.</p>
+      <section className="form-section" aria-labelledby="vpn-connection-settings-heading">
+      <h2 id="vpn-connection-settings-heading">Connection settings</h2>
       <label>Profile name<input required maxLength={80} value={name} onChange={(event) => setName(event.target.value)} /></label>
       <div className="vpn-file"><span>{configPath ? configPath.split(/[\\/]/).pop() : "No .ovpn file selected"}</span><button type="button" className="secondary" disabled={busy} onClick={() => void perform(async () => {
         const path = await pickVpnConfig(); if (typeof path === "string") setConfigPath(path);
@@ -177,7 +179,8 @@ export function VpnSettings({ profiles, projects, onRefresh }: {
       </div>
       <label>Published ports <span className="optional">optional</span><input className="mono" value={ports} placeholder="3000:3000, 8080:8080" onChange={(event) => setPorts(event.target.value)} /><small>HOST:CONTAINER, comma-separated. Host listeners bind only to 127.0.0.1; configure these shared mappings before connecting. Container ports 53, 8000, 9999 and 11940 are reserved.</small></label>
       {formError && <p className="field-error" role="alert">{formError}</p>}
-      <button className="primary" disabled={busy}>{busy ? "Working…" : "Import profile"}</button>
+      </section>
+      <div className="form-actions" role="group" aria-label="Form actions"><button className="primary" disabled={busy}>{busy ? "Working…" : "Import profile"}</button></div>
     </form>
   </div>;
 }

@@ -968,7 +968,7 @@ input[type="radio"] {
   accent-color: var(--primary);
   margin: 0;
 }
-.service-form > label,
+.service-form .form-section > label,
 .service-form .form-row {
   margin-bottom: 24px;
 }
@@ -1122,7 +1122,8 @@ label small {
 .client-row > button {
   margin-left: auto;
 }
-.settings-section > label {
+.settings-section > label,
+.settings-section .form-section > label {
   margin-top: 20px;
   max-width: 500px;
 }
@@ -1416,3 +1417,12 @@ label small {
 
 .sidebar .icon-button,
 .sidebar .open-folder { border: 1px solid var(--muted); }
+
+.service-view-tabs { display: flex; align-items: stretch; gap: 20px; }
+.service-operation-header { background: var(--ops-panel-solid); }
+.service-command-beam { border-color: var(--ops-rim); border-radius: var(--ops-radius-sm); }
+.form-section { min-width: 0; }
+.settings-section .form-section { display: grid; gap: 16px; margin-top: 20px; }
+.settings-section .form-section > label { margin-top: 0; }
+.form-actions { display: flex; flex-wrap: wrap; gap: 10px; }
+.group-editor .form-actions .danger-text { margin-left: auto; }

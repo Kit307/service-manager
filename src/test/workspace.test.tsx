@@ -94,8 +94,8 @@ describe("workspace interactions", () => {
     await user.clear(screen.getByLabelText("Service name"));
     await user.type(screen.getByLabelText("Service name"), "My edited name");
     await act(async () => onWorkspace?.(fixture("revision-b")));
-    await user.click(screen.getByRole("button", { name: "Output" }));
-    await user.click(screen.getByRole("button", { name: "Settings" }));
+    await user.click(screen.getByRole("tab", { name: "Output" }));
+    await user.click(screen.getByRole("tab", { name: "Settings" }));
     expect(screen.getByLabelText("Service name")).toHaveValue("My edited name");
     await user.click(screen.getByRole("button", { name: "Save service" }));
     await waitFor(() =>
@@ -122,19 +122,19 @@ describe("workspace interactions", () => {
     await user.click(
       await screen.findByRole("button", { name: "Frontend Running" }),
     );
-    await user.click(screen.getByRole("button", { name: "Settings" }));
+    await user.click(screen.getByRole("tab", { name: "Settings" }));
     expect(screen.getByRole("heading", { name: "Frontend" })).toBeVisible();
     expect(screen.getByRole("button", { name: "Stop" })).toBeVisible();
     expect(screen.getByRole("button", { name: "Restart" })).toBeVisible();
-    expect(screen.getByRole("button", { name: "Settings" })).toHaveAttribute(
-      "aria-pressed",
+    expect(screen.getByRole("tab", { name: "Settings" })).toHaveAttribute(
+      "aria-selected",
       "true",
     );
     expect(screen.getByLabelText("Service name")).toBeVisible();
     await user.type(screen.getByLabelText("Service name"), " draft");
     await user.click(screen.getByRole("button", { name: "Cancel" }));
     expect(screen.getByRole("region", { name: "Log output" })).toBeVisible();
-    await user.click(screen.getByRole("button", { name: "Settings" }));
+    await user.click(screen.getByRole("tab", { name: "Settings" }));
     expect(screen.getByLabelText("Service name")).toHaveValue("Frontend");
   });
   it("retains log search and records when switching between Output and Settings", async () => {
@@ -166,8 +166,8 @@ describe("workspace interactions", () => {
       screen.getByRole("textbox", { name: "Search logs" }),
       "Success",
     );
-    await user.click(screen.getByRole("button", { name: "Settings" }));
-    await user.click(screen.getByRole("button", { name: "Output" }));
+    await user.click(screen.getByRole("tab", { name: "Settings" }));
+    await user.click(screen.getByRole("tab", { name: "Output" }));
     expect(screen.getByRole("textbox", { name: "Search logs" })).toHaveValue(
       "Success",
     );

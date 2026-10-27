@@ -22,3 +22,7 @@
 .dependency-options label { display: flex; flex-direction: row; align-items: center; gap: 8px; }
 .dependency-options input { width: auto; }
 @media (max-width: 600px) { .operations-panel { padding: 16px; } .port-listener, .failure-alert { flex-wrap: wrap; } }
+
+.operations-panel { background: var(--ops-panel-solid); }
+.run-list > button { border: 1px solid var(--ops-rim); border-radius: var(--ops-radius-sm); background: var(--ops-panel); }
+.context-label textarea { border-color: var(--ops-rim); border-radius: var(--ops-radius-sm); }

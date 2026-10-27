@@ -660,7 +660,7 @@ export default function App() {
           </div>
         ) : !service ? null : (
           <>
-            <section className="service-summary">
+            <section className="service-summary service-operation-header" role="region" aria-label="Service controls">
               <div className="service-heading">
                 <div className="service-identity">
                   <span className="service-icon">
@@ -728,7 +728,7 @@ export default function App() {
                   )}
                 </div>
               </div>
-              <div className="command-display">
+              <div className="command-display service-command-beam" role="group" aria-label="Service command and status">
                 <span className="command-prompt">$</span>
                 <code>
                   {service.type === "command"
@@ -765,23 +765,25 @@ export default function App() {
               )}
             </section>
             <div className="service-tabs">
-              <button
+              <div className="service-view-tabs" role="tablist" aria-label="Service views">
+              <button role="tab"
                 className={view === "service" ? "selected" : ""}
-                aria-pressed={view === "service"}
+                aria-selected={view === "service"}
                 onClick={() => setView("service")}
               >
                 <Icon name="terminal" size={14} />
                 Output
               </button>
-              <button
+              <button role="tab"
                 className={view === "settings" ? "selected" : ""}
-                aria-pressed={view === "settings"}
+                aria-selected={view === "settings"}
                 onClick={() => beginEdit("settings")}
               >
                 <Icon name="settings" size={14} />
                 Settings
               </button>
-              {(["history", "diagnostics"] as const).map((tab) => <button key={tab} className={view === tab ? "selected" : ""} aria-pressed={view === tab} onClick={() => setView(tab)}>{tab === "history" ? "History" : "Diagnostics"}</button>)}
+              {(["history", "diagnostics"] as const).map((tab) => <button role="tab" key={tab} className={view === tab ? "selected" : ""} aria-selected={view === tab} onClick={() => setView(tab)}>{tab === "history" ? "History" : "Diagnostics"}</button>)}
+              </div>
               <button className="secondary" onClick={() => openLogs({ projectId: project.id, serviceId: service.id })}>
                 Open in log workspace
               </button>

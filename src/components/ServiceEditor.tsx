@@ -120,6 +120,7 @@ export function ServiceEditor({
           <p>A command, a working folder, and a place to watch it run.</p>
         </div>
       </div>
+      <section className="form-section" aria-label="Service configuration">
       <div className="form-row">
         <label>
           Service name
@@ -314,7 +315,8 @@ export function ServiceEditor({
           })}
         </fieldset>
       )}
-      <div className="form-footer">
+      </section>
+      <div className="form-footer form-actions" role="group" aria-label="Form actions">
         <div>
           {onRemove && (
             <button type="button" className="danger-text" onClick={onRemove}>

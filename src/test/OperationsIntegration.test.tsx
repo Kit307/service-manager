@@ -67,16 +67,20 @@ it("cancels a pending sequence without stopping already started services", async
 it("retains service identity and controls across History and Diagnostics tabs", async () => {
   render(<App />);
   await userEvent.click(await screen.findByRole("button", { name: /One Running/ }));
-  await userEvent.click(screen.getByRole("button", { name: "History" }));
+  expect(screen.getByRole("region", { name: "Service controls" })).toBeVisible();
+  expect(screen.getByRole("group", { name: "Service command and status" })).toBeVisible();
+  expect(screen.getByRole("tablist", { name: "Service views" })).toBeVisible();
+  expect(screen.getAllByRole("tab").filter((tab) => tab.getAttribute("aria-selected") === "true")).toHaveLength(1);
+  await userEvent.click(screen.getByRole("tab", { name: "History" }));
   expect(await screen.findByRole("region", { name: "Run history" })).toBeVisible();
   expect(screen.getByRole("heading", { level: 1, name: "One" })).toBeVisible();
   expect(screen.getByRole("button", { name: "Restart" })).toBeVisible();
   expect(screen.getByRole("button", { name: "Stop" })).toBeVisible();
-  await userEvent.click(screen.getByRole("button", { name: "Diagnostics" }));
+  await userEvent.click(screen.getByRole("tab", { name: "Diagnostics" }));
   expect(await screen.findByRole("region", { name: "Service diagnostics" })).toBeVisible();
   expect(screen.getByRole("heading", { level: 1, name: "One" })).toBeVisible();
   expect(screen.getByRole("button", { name: "Stop" })).toBeVisible();
-  await userEvent.click(screen.getByRole("button", { name: "Output" }));
+  await userEvent.click(screen.getByRole("tab", { name: "Output" }));
   expect(screen.getByRole("region", { name: "Service logs" })).toBeVisible();
 });
 it("opens the configured service URL through the native API", async () => {
