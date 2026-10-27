@@ -124,3 +124,10 @@ it("keeps compact workspace search, stream selection, follow and clear accessibl
   await user.click(screen.getByRole("button", { name: "Clear output" }));
   expect(clear).toHaveBeenCalledOnce();
 });
+
+it("uses the shared console for both log layouts", () => {
+  const { rerender } = render(<LogPanel {...props} />);
+  expect(screen.getByRole("region", { name: "Service logs" })).toHaveClass("ops-console");
+  rerender(<LogPanel {...props} compact />);
+  expect(screen.getByRole("region", { name: "Service logs" })).toHaveClass("ops-console");
+});

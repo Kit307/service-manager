@@ -26,6 +26,12 @@ it("opens distinct tabs, retains independent search, and closes observation with
   const clear = vi.spyOn(api, "clearLogs");
   const { rerender } = render(<LogWorkspace services={services} requested={ref("API")} />);
   await screen.findByText("API output");
+  expect(screen.getByRole("region", { name: "Log pane" })).toHaveClass("ops-console");
+  expect(screen.getByRole("tablist", { name: /Log tabs/i })).toBeVisible();
+  expect(within(screen.getByRole("tab", { name: "API Stopped" })).getByText("Stopped")).toBeVisible();
+  expect(screen.getByRole("button", { name: "Move active log tab left" })).toBeVisible();
+  expect(screen.getByRole("button", { name: "Move active log tab right" })).toBeVisible();
+  expect(screen.getByLabelText("Move active log tab to pane")).toBeVisible();
   await user.type(screen.getByRole("textbox", { name: "Search logs" }), "API");
   rerender(<LogWorkspace services={services} requested={ref("Web")} />);
   await screen.findByText("Web output");
@@ -43,7 +49,7 @@ it("moves tabs through keyboard controls and creates more than two panes", async
   const { rerender } = render(<LogWorkspace services={services} requested={ref("API")} />);
   rerender(<LogWorkspace services={services} requested={ref("Web")} />);
   await user.click(screen.getByRole("button", { name: "Move active log tab left" }));
-  expect(screen.getAllByRole("tab").map((tab) => tab.textContent)).toEqual(["Web", "API"]);
+  expect(screen.getAllByRole("tab").map((tab) => tab.textContent)).toEqual(["WebStopped", "APIStopped"]);
   await user.selectOptions(screen.getByRole("combobox", { name: "Move active log tab to pane" }), "new");
   await user.click(screen.getByRole("button", { name: "Add pane" }));
   await user.click(screen.getByRole("button", { name: "Add pane" }));
@@ -124,7 +130,7 @@ it("uses captured pointer drops to reorder and creates panes only for explicit i
   fireEvent.pointerDown(web, { button: 0, clientX: 10, clientY: 10 });
   fireEvent.pointerMove(web, { clientX: 50, clientY: 50 });
   fireEvent.pointerUp(web, { clientX: 50, clientY: 50 });
-  expect(screen.getAllByRole("tab").map((tab) => tab.textContent)).toEqual(["Web", "API"]);
+  expect(screen.getAllByRole("tab").map((tab) => tab.textContent)).toEqual(["WebStopped", "APIStopped"]);
   fireEvent.pointerDown(web, { button: 0, clientX: 10, clientY: 10 });
   fireEvent.pointerMove(web, { clientX: 50, clientY: 50 });
   hitTest.mockReturnValue(document.body);

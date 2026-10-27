@@ -1,8 +1,31 @@
+.ops-console {
+  --surface: var(--ops-console);
+  --bg: var(--ops-console);
+  --log-bg: var(--ops-console);
+  --ink: var(--ops-console-ink);
+  --muted: #b3c1d0;
+  --subtle: #a4b5c7;
+  --line: #435364;
+  --hover: #273746;
+  --selected: #34495c;
+  --selected-ink: #f4f8fc;
+  --red: #ff9f9f;
+  --amber: #f4ca78;
+  --green: #8cdbac;
+  color: var(--ops-console-ink);
+  background: var(--ops-console);
+}
+.ops-console .log-toolbar,
+.ops-console .log-filters,
+.ops-console .log-viewport,
+.ops-console .log-status { background: var(--ops-console); }
+.ops-console .search-input input { color: var(--ops-console-ink); }
+.ops-console .log-line time, .ops-console .log-count, .ops-console .log-status { font-variant-numeric: tabular-nums; }
 .log-panel-compact .log-toolbar {
   gap: 8px;
   min-height: 44px;
   padding: 6px 10px;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
   background: transparent;
   box-shadow: none;
 }
@@ -55,8 +78,8 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 0;
-  width: 28px;
+  gap: 4px;
+  padding: 0 6px;
   height: 28px;
   border: 1px solid transparent;
   border-radius: 7px;
@@ -67,14 +90,6 @@
 .log-panel-compact .button-row button::before { display: none; }
 .log-panel-compact .button-row button:hover,
 .log-panel-compact .button-row button.active { background: var(--selected); color: var(--ink); }
-.log-panel-compact .log-action-label {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  padding: 0;
-  overflow: hidden;
-  clip-path: inset(50%);
-  white-space: nowrap;
-}
+.log-panel-compact .log-action-label { white-space: nowrap; }
 .log-panel-compact .log-status { padding: 8px 12px; font-size: 10px; background: transparent; }
 .log-panel-compact .log-status > span { min-width: 0; }

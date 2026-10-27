@@ -104,7 +104,7 @@ export function LogPanel({
     {!compact && <kbd>⌕</kbd>}
   </label>;
   return (
-    <section className={`log-panel${compact ? " log-panel-compact" : ""}`} aria-label={label}>
+    <section className={`log-panel ops-console${compact ? " log-panel-compact" : ""}`} aria-label={label}>
       <div className="log-toolbar">
         {compact ? <>
           {search}

@@ -18,7 +18,7 @@
 .log-move-select:focus-within, .log-add-select:focus-within { outline: 2px solid var(--primary); outline-offset: 2px; border-radius: 7px; }
 .log-workspace-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 440px), 1fr)); grid-auto-rows: minmax(300px, 1fr); align-content: stretch; gap: 14px; overflow: auto; min-height: 0; flex: 1; padding: 2px; }
 .log-workspace-pane { display: flex; flex-direction: column; min-width: 0; min-height: 300px; border: 1px solid var(--line); border-radius: 13px; overflow: hidden; background: var(--log-bg); box-shadow: 0 3px 14px #00000006; }
-.log-workspace-pane-header { display: flex; align-items: center; flex-shrink: 0; min-width: 0; padding: 0 8px 0 4px; gap: 7px; min-height: 40px; border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--surface) 80%, transparent); box-shadow: inset 0 1px 0 var(--glass-highlight); }
+.log-workspace-pane-header { display: flex; align-items: center; flex-shrink: 0; min-width: 0; padding: 0 8px 0 4px; gap: 7px; min-height: 40px; border-bottom: 1px solid var(--line); background: var(--ops-console); box-shadow: inset 0 1px 0 var(--glass-highlight); }
 .log-workspace-tabs { display: flex; align-items: stretch; align-self: stretch; overflow-x: auto; flex: 1 1 auto; min-width: 0; gap: 1px; scrollbar-width: none; }
 .log-workspace-tabs::-webkit-scrollbar { display: none; }
 .log-workspace-tab { position: relative; display: flex; align-items: center; flex-shrink: 0; border-bottom: 2px solid transparent; padding: 0 2px; }

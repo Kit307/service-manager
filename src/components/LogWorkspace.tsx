@@ -82,12 +82,12 @@ function LogPane({ pane, services, visible, root, views, onView, cursors, onCurs
       (element.current ?? workspace)?.querySelector<HTMLElement>('[role="tab"][aria-selected="true"], select[aria-label="Add service log"]')?.focus();
     });
   }
-  return <section ref={element} className="log-workspace-pane" aria-label="Log pane" data-log-drop-pane={pane.id} onPointerDown={() => { if (pane.active) onFocus(pane.active); }} onFocus={(event) => {
+  return <section ref={element} className="log-workspace-pane ops-console" aria-label="Log pane" data-log-drop-pane={pane.id} onPointerDown={() => { if (pane.active) onFocus(pane.active); }} onFocus={(event) => {
     const key = event.target.closest<HTMLElement>("[data-log-drop-tab]")?.dataset.logDropTab ?? pane.active;
     if (key) onFocus(key);
   }}>
     <div className="log-workspace-pane-header" data-log-drop-pane={pane.id}>
-    <div className="log-workspace-tabs" role="tablist" aria-label="Open service logs" data-log-drop-pane={pane.id}>
+    <div className="log-workspace-tabs" role="tablist" aria-label="Log tabs" data-log-drop-pane={pane.id}>
       {pane.tabs.map((ref, index) => {
         const key = refKey(ref);
         const item = services.find((value) => refKey(serviceRef(value)) === key);
@@ -113,7 +113,7 @@ function LogPane({ pane, services, visible, root, views, onView, cursors, onCurs
                 buttons?.[next]?.focus();
               } else if (event.key === "Delete") { event.preventDefault(); closeTab(ref); }
             }}>
-            <span className={`status-dot ${state}`} />{item.service.name}{duplicate && <small>{item.project.name}</small>}
+            <span className={`status-dot ${state}`} />{item.service.name}{duplicate && <small>{item.project.name}</small>}<small>{stateLabel(state)}</small>
           </button>
           <button className="log-tab-close" aria-label={`Close ${item.service.name} log tab`} title={`Close ${item.service.name} log tab`} onClick={() => closeTab(ref)}><Icon name="close" size={12} /></button>
         </div>;
