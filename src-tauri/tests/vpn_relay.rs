@@ -212,3 +212,74 @@ async fn traffic_tracks_live_payloads_and_independent_routes() {
     .await
     .unwrap();
 }
+
+#[tokio::test]
+async fn half_close_keeps_reverse_payload_and_traffic() {
+    let target = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
+    let local_port = free_port().await;
+    let relay = VpnRelaySet::start(vec![RelayTarget {
+        route: route(local_port, target.local_addr().unwrap().port()),
+        proxy: proxy("200 Connection Established").await,
+    }])
+    .await
+    .unwrap();
+    let traffic = relay.traffic().remove(0);
+    let mut client = TcpStream::connect((Ipv4Addr::LOCALHOST, local_port))
+        .await
+        .unwrap();
+    let (mut remote, _) = target.accept().await.unwrap();
+    client.write_all(b"request").await.unwrap();
+    client.shutdown().await.unwrap();
+    let mut request = Vec::new();
+    tokio::time::timeout(Duration::from_secs(2), remote.read_to_end(&mut request))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(request, b"request");
+    remote.write_all(b"response").await.unwrap();
+    remote.shutdown().await.unwrap();
+    let mut response = Vec::new();
+    tokio::time::timeout(Duration::from_secs(2), client.read_to_end(&mut response))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(response, b"response");
+    let snapshot = traffic.snapshot();
+    assert_eq!((snapshot.tx_bytes, snapshot.rx_bytes), (7, 8));
+}
+
+#[tokio::test]
+async fn active_connections_decrement_independently_and_on_relay_drop() {
+    let target = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
+    let local_port = free_port().await;
+    let relay = VpnRelaySet::start(vec![RelayTarget {
+        route: route(local_port, target.local_addr().unwrap().port()),
+        proxy: proxy("200 Connection Established").await,
+    }])
+    .await
+    .unwrap();
+    let traffic = relay.traffic().remove(0);
+    let client_a = TcpStream::connect((Ipv4Addr::LOCALHOST, local_port))
+        .await
+        .unwrap();
+    let (remote_a, _) = target.accept().await.unwrap();
+    let _client_b = TcpStream::connect((Ipv4Addr::LOCALHOST, local_port))
+        .await
+        .unwrap();
+    let (_remote_b, _) = target.accept().await.unwrap();
+    async fn wait_for(traffic: &service_manager::vpn_relay::RelayTraffic, count: u64) {
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while traffic.snapshot().active_connections != count {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+    }
+    wait_for(&traffic, 2).await;
+    drop(client_a);
+    drop(remote_a);
+    wait_for(&traffic, 1).await;
+    drop(relay);
+    wait_for(&traffic, 0).await;
+}

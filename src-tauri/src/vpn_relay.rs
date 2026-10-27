@@ -64,13 +64,13 @@ impl Drop for Established {
     }
 }
 
-struct CountedStream {
-    stream: TcpStream,
+struct CountedStream<S> {
+    stream: S,
     counters: Arc<Counters>,
     tx: bool,
 }
 
-impl AsyncRead for CountedStream {
+impl<S: AsyncRead + Unpin> AsyncRead for CountedStream<S> {
     fn poll_read(
         mut self: Pin<&mut Self>,
         cx: &mut Context<'_>,
@@ -80,7 +80,7 @@ impl AsyncRead for CountedStream {
     }
 }
 
-impl AsyncWrite for CountedStream {
+impl<S: AsyncWrite + Unpin> AsyncWrite for CountedStream<S> {
     fn poll_write(
         mut self: Pin<&mut Self>,
         cx: &mut Context<'_>,
@@ -230,4 +230,77 @@ async fn forward(
         .await
         .map_err(|_| error("VPN relay connection ended unexpectedly."))?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::{collections::VecDeque, task::Wake};
+
+    struct ScriptedWriter(VecDeque<Poll<io::Result<usize>>>);
+
+    impl AsyncWrite for ScriptedWriter {
+        fn poll_write(
+            mut self: Pin<&mut Self>,
+            _: &mut Context<'_>,
+            _: &[u8],
+        ) -> Poll<io::Result<usize>> {
+            self.0.pop_front().unwrap()
+        }
+        fn poll_flush(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<io::Result<()>> {
+            Poll::Ready(Ok(()))
+        }
+        fn poll_shutdown(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<io::Result<()>> {
+            Poll::Ready(Ok(()))
+        }
+    }
+
+    struct NoopWake;
+    impl Wake for NoopWake {
+        fn wake(self: Arc<Self>) {}
+    }
+
+    #[test]
+    fn counts_only_successful_written_bytes() {
+        let counters = Arc::new(Counters::default());
+        let mut stream = CountedStream {
+            stream: ScriptedWriter(VecDeque::from([
+                Poll::Ready(Ok(2)),
+                Poll::Pending,
+                Poll::Ready(Ok(3)),
+                Poll::Ready(Ok(0)),
+                Poll::Ready(Err(io::Error::other("write failed"))),
+            ])),
+            counters: counters.clone(),
+            tx: true,
+        };
+        let waker = std::task::Waker::from(Arc::new(NoopWake));
+        let mut cx = Context::from_waker(&waker);
+        let input = b"abcdefgh";
+        assert!(matches!(
+            Pin::new(&mut stream).poll_write(&mut cx, input),
+            Poll::Ready(Ok(2))
+        ));
+        assert_eq!(counters.tx.load(Ordering::Relaxed), 2);
+        assert!(matches!(
+            Pin::new(&mut stream).poll_write(&mut cx, input),
+            Poll::Pending
+        ));
+        assert_eq!(counters.tx.load(Ordering::Relaxed), 2);
+        assert!(matches!(
+            Pin::new(&mut stream).poll_write(&mut cx, input),
+            Poll::Ready(Ok(3))
+        ));
+        assert_eq!(counters.tx.load(Ordering::Relaxed), 5);
+        assert!(matches!(
+            Pin::new(&mut stream).poll_write(&mut cx, input),
+            Poll::Ready(Ok(0))
+        ));
+        assert!(matches!(
+            Pin::new(&mut stream).poll_write(&mut cx, input),
+            Poll::Ready(Err(_))
+        ));
+        assert_eq!(counters.tx.load(Ordering::Relaxed), 5);
+        assert_eq!(counters.rx.load(Ordering::Relaxed), 0);
+    }
 }
