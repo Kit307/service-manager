@@ -11,6 +11,7 @@
   flex-wrap: wrap;
   gap: 16px 28px;
   margin-bottom: 24px;
+  padding: 18px;
 }
 
 .workspace-overview .welcome-kicker { margin: 0 0 8px; }
@@ -38,6 +39,7 @@
 .workspace-overview .group-actions { margin: 0; gap: 8px; }
 .overview-controls .overview-add { margin-left: auto; }
 .workspace-overview .overview-note { max-width: 700px; margin: 12px 0 0; }
+.workspace-overview .overview-controls + .overview-note { padding: 12px 16px; }
 
 .workspace-overview .group-service-list {
   display: grid;

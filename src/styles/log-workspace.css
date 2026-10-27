@@ -29,6 +29,7 @@
 .log-workspace-tab .status-dot { width: 6px; height: 6px; flex-shrink: 0; }
 .log-workspace-tab small { max-width: 90px; overflow: hidden; text-overflow: ellipsis; color: var(--muted); font-size: 10px; font-weight: 400; }
 .log-workspace .log-tab-close, .log-workspace .log-close-pane { display: inline-flex; align-items: center; justify-content: center; border: 0; padding: 4px; border-radius: 5px; box-shadow: none; background: none; color: var(--muted); }
+.log-workspace-tab > [role=tab]:focus-visible, .log-workspace .log-tab-close:focus-visible, .log-workspace .log-close-pane:focus-visible { outline-offset: -3px; }
 .log-workspace .log-tab-close { margin: 0 3px 0 1px; opacity: .55; }
 .log-workspace-tab:hover .log-tab-close, .log-tab-close:focus-visible { opacity: 1; }
 .log-workspace .log-tab-close:hover, .log-workspace .log-close-pane:hover { background: var(--hover); color: var(--ink); }

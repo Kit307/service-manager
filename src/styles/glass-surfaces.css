@@ -134,6 +134,13 @@ button:disabled {
   background: var(--reading-surface);
 }
 
+:is(.service-summary, .workspace-overview .overview-header, .overview-controls + .overview-note) {
+  background: var(--reading-surface);
+  border: 1px solid var(--control-rim);
+  border-radius: 16px;
+  box-shadow: var(--control-depth), inset 1px 0 0 color-mix(in srgb, var(--control-rim) 40%, transparent);
+}
+
 .service-row.selected,
 .ai-nav.selected {
   background: var(--control-glass-hover);
