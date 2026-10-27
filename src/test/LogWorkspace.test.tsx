@@ -146,3 +146,40 @@ it("uses captured pointer drops to reorder and creates panes only for explicit i
   fireEvent.pointerUp(apiTab, { clientX: 50, clientY: 50 });
   expect(screen.getAllByRole("region", { name: "Log pane" })).toHaveLength(2);
 });
+
+it("supports keyboard navigation and panel relationships for mixed restored tabs", async () => {
+  const missing = ref("Missing");
+  localStorage.setItem("log-workspace-v1", JSON.stringify([{ id: "mixed", tabs: [ref("API"), missing, ref("Web")], active: refKey(missing) }]));
+  const user = userEvent.setup();
+  render(<LogWorkspace services={services} />);
+  const unavailable = screen.getByRole("tab", { name: "Unavailable service" });
+  const tabs = screen.getAllByRole("tab");
+  const panel = screen.getByRole("tabpanel", { name: "Unavailable service" });
+  expect(panel).toHaveTextContent("Unavailable service");
+  for (const tab of tabs) expect(document.getElementById(tab.getAttribute("aria-controls")!)).toBe(panel);
+  expect(unavailable).toHaveAttribute("tabindex", "0");
+  unavailable.focus();
+  await user.keyboard("{ArrowRight}");
+  const web = screen.getByRole("tab", { name: "Web Stopped" });
+  expect(web).toHaveFocus();
+  expect(screen.getByRole("tabpanel", { name: "Web Stopped" })).toHaveAttribute("aria-labelledby", web.id);
+  for (const tab of tabs) expect(document.getElementById(tab.getAttribute("aria-controls")!)).toBeInTheDocument();
+  await user.keyboard("{Home}");
+  expect(screen.getByRole("tab", { name: "API Stopped" })).toHaveFocus();
+  await user.keyboard("{End}{ArrowLeft}");
+  expect(unavailable).toHaveFocus();
+  await user.keyboard("{Alt>}{ArrowLeft}{/Alt}");
+  expect(screen.getAllByRole("tab")[0]).toBe(unavailable);
+  await user.keyboard("{Delete}");
+  expect(screen.queryByRole("tab", { name: "Unavailable service" })).not.toBeInTheDocument();
+  await waitFor(() => expect(screen.getByRole("tab", { selected: true })).toHaveFocus());
+});
+
+it("disambiguates close buttons for duplicate service names", () => {
+  const other = service("API");
+  other.project = { ...other.project, id: "other", name: "Other" };
+  localStorage.setItem("log-workspace-v1", JSON.stringify([{ id: "mixed", tabs: [ref("API"), { projectId: "other", serviceId: "API" }], active: refKey(ref("API")) }]));
+  render(<LogWorkspace services={[services[0], other]} />);
+  expect(screen.getByRole("button", { name: "Close API · Fixture log tab" })).toBeVisible();
+  expect(screen.getByRole("button", { name: "Close API · Other log tab" })).toBeVisible();
+});

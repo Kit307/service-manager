@@ -91,16 +91,14 @@ function LogPane({ pane, services, visible, root, views, onView, cursors, onCurs
       {pane.tabs.map((ref, index) => {
         const key = refKey(ref);
         const item = services.find((value) => refKey(serviceRef(value)) === key);
-        if (!item) return <div className="log-workspace-tab" key={key} data-log-drop-tab={key}>
-          <button role="tab" aria-selected={pane.active === key} tabIndex={pane.active === key ? 0 : -1} onClick={() => onActivate(ref)}>Unavailable service</button>
-          <button className="log-tab-close" aria-label="Close unavailable log tab" onClick={() => closeTab(ref)}><Icon name="close" size={12} /></button>
-        </div>;
-        const state = item.project.runtime[item.service.id]?.state ?? "stopped";
-        const duplicate = services.some((other) => other !== item && other.service.name === item.service.name);
+        const state = item?.project.runtime[item.service.id]?.state ?? "stopped";
+        const duplicate = item && services.some((other) => other !== item && other.service.name === item.service.name);
+        const name = item ? `${item.service.name}${duplicate ? ` · ${item.project.name}` : ""}` : "Unavailable service";
+        const closeLabel = item ? `Close ${name} log tab` : "Close unavailable log tab";
         return <div className={`log-workspace-tab ${pane.active === key ? "selected" : ""}`} key={key} data-log-drop-tab={key} data-log-drop-pane={pane.id}>
           <button role="tab" id={`log-tab-${encodeURIComponent(key)}`} aria-controls={`log-pane-${pane.id}`} aria-selected={pane.active === key} tabIndex={pane.active === key ? 0 : -1}
-            aria-label={`${item.service.name}${duplicate ? ` · ${item.project.name}` : ""} ${stateLabel(state)}`}
-            title={`${item.project.path} · Drag to reorder or another pane. Alt+Arrow moves a tab.`}
+            aria-label={item ? `${name} ${stateLabel(state)}` : name}
+            title={item ? `${item.project.path} · Drag to reorder or another pane. Alt+Arrow moves a tab.` : undefined}
             onClick={() => onActivate(ref)} onPointerDown={(event) => onDrag(event, ref)}
             onKeyDown={(event) => {
               const offset = event.key === "ArrowLeft" ? -1 : event.key === "ArrowRight" ? 1 : 0;
@@ -113,9 +111,9 @@ function LogPane({ pane, services, visible, root, views, onView, cursors, onCurs
                 buttons?.[next]?.focus();
               } else if (event.key === "Delete") { event.preventDefault(); closeTab(ref); }
             }}>
-            <span className={`status-dot ${state}`} />{item.service.name}{duplicate && <small>{item.project.name}</small>}<small>{stateLabel(state)}</small>
+            {item ? <><span className={`status-dot ${state}`} />{item.service.name}{duplicate && <small>{item.project.name}</small>}<small>{stateLabel(state)}</small></> : name}
           </button>
-          <button className="log-tab-close" aria-label={`Close ${item.service.name} log tab`} title={`Close ${item.service.name} log tab`} onClick={() => closeTab(ref)}><Icon name="close" size={12} /></button>
+          <button className="log-tab-close" aria-label={closeLabel} title={closeLabel} onClick={() => closeTab(ref)}><Icon name="close" size={12} /></button>
         </div>;
       })}
     </div>
@@ -125,8 +123,8 @@ function LogPane({ pane, services, visible, root, views, onView, cursors, onCurs
       }}><option value="">Open log…</option>{services.map((item) => <option key={refKey(serviceRef(item))} value={refKey(serviceRef(item))}>{item.service.name} · {item.project.name}</option>)}</select></label>
       <button className="log-close-pane" aria-label="Close log pane" title="Close pane" onClick={onClosePane}><Icon name="close" size={14} /></button>
     </div>
-    {entry && selected ? <div className="log-workspace-output" id={`log-pane-${pane.id}`} role="tabpanel" aria-label={`${entry.service.name} output`} aria-labelledby={`log-tab-${encodeURIComponent(refKey(selected))}`}>
-      {visible && inViewport ? <Feed key={refKey(selected)} entry={entry} view={views[refKey(selected)] ?? defaultView()}
+    {selected ? <div className="log-workspace-output" id={`log-pane-${pane.id}`} role="tabpanel" aria-labelledby={`log-tab-${encodeURIComponent(refKey(selected))}`}>
+      {!entry ? <div className="log-workspace-empty"><strong>Unavailable service</strong><p>This service is no longer available.</p></div> : visible && inViewport ? <Feed key={refKey(selected)} entry={entry} view={views[refKey(selected)] ?? defaultView()}
         onView={(next) => onView(refKey(selected), next)} cursor={cursors[refKey(selected)]} onCursor={(next) => onCursor(refKey(selected), next)} />
         : <div className="log-workspace-empty"><Icon name="terminal" size={22} /><strong>Observation paused</strong><p>Output resumes when this pane is visible.</p></div>}
     </div> : <div className="log-workspace-empty"><div className="log-empty-symbol"><Icon name="terminal" size={24} /></div><strong>A place for your output</strong><p>Open a service log or drop a tab here.</p></div>}
