@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { flushSync } from "react-dom";
 import {
   api,
   confirmAction,
@@ -765,24 +766,26 @@ export default function App() {
               )}
             </section>
             <div className="service-tabs">
-              <div className="service-view-tabs" role="tablist" aria-label="Service views">
-              <button role="tab"
-                className={view === "service" ? "selected" : ""}
-                aria-selected={view === "service"}
-                onClick={() => setView("service")}
-              >
-                <Icon name="terminal" size={14} />
-                Output
-              </button>
-              <button role="tab"
-                className={view === "settings" ? "selected" : ""}
-                aria-selected={view === "settings"}
-                onClick={() => beginEdit("settings")}
-              >
-                <Icon name="settings" size={14} />
-                Settings
-              </button>
-              {(["history", "diagnostics"] as const).map((tab) => <button role="tab" key={tab} className={view === tab ? "selected" : ""} aria-selected={view === tab} onClick={() => setView(tab)}>{tab === "history" ? "History" : "Diagnostics"}</button>)}
+              <div className="service-view-tabs" role="tablist" aria-label="Service views" onKeyDown={(event) => {
+                const offset = event.key === "ArrowLeft" ? -1 : event.key === "ArrowRight" ? 1 : 0;
+                if (!offset && event.key !== "Home" && event.key !== "End") return;
+                const buttons = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="tab"]'));
+                const index = buttons.indexOf(event.target as HTMLButtonElement);
+                if (index < 0) return;
+                event.preventDefault();
+                const next = event.key === "Home" ? 0 : event.key === "End" ? buttons.length - 1 : (index + offset + buttons.length) % buttons.length;
+                flushSync(() => buttons[next]?.click());
+                buttons[next]?.focus();
+              }}>
+                {(["service", "settings", "history", "diagnostics"] as const).map((tab) => (
+                  <button key={tab} role="tab" id={`service-tab-${tab}`} aria-controls={`service-panel-${tab}`}
+                    className={view === tab ? "selected" : ""} aria-selected={view === tab} tabIndex={view === tab ? 0 : -1}
+                    onClick={() => tab === "settings" ? beginEdit("settings") : setView(tab)}>
+                    {tab === "service" && <Icon name="terminal" size={14} />}
+                    {tab === "settings" && <Icon name="settings" size={14} />}
+                    {tab === "service" ? "Output" : tab === "settings" ? "Settings" : tab === "history" ? "History" : "Diagnostics"}
+                  </button>
+                ))}
               </div>
               <button className="secondary" onClick={() => openLogs({ projectId: project.id, serviceId: service.id })}>
                 Open in log workspace
@@ -793,7 +796,7 @@ export default function App() {
                   : "No health check configured"}
               </span>
             </div>
-            <div className="service-pane" hidden={view !== "service"}>
+            <div className="service-pane" role="tabpanel" id="service-panel-service" aria-labelledby="service-tab-service" hidden={view !== "service"}>
               <LogPanel
                 key={`${project.id}/${service.id}`}
                 logs={logs}
@@ -807,14 +810,16 @@ export default function App() {
                 }}
               />
             </div>
-            {(view === "history" || view === "diagnostics") && <ServiceOperations projectId={project.id} serviceId={service.id} mode={view} onService={(ref) => {
+            {(view === "history" || view === "diagnostics") && <div role="tabpanel" id={`service-panel-${view}`} aria-labelledby={`service-tab-${view}`} className="service-pane"><ServiceOperations projectId={project.id} serviceId={service.id} mode={view} onService={(ref) => {
               const target=workspace.projects.find((p) => p.id === ref.projectId); if(target) select(target,ref.serviceId);
-            }} />}
+            }} /></div>}
             {draft?.projectId === project.id &&
               draft.serviceId === service.id && (
                 <section
                   className="editor-scroll service-settings"
-                  aria-label="Service settings"
+                  role="tabpanel"
+                  id="service-panel-settings"
+                  aria-labelledby="service-tab-settings"
                   hidden={view !== "settings"}
                 >
                   <p className="editor-root">Working folder: {project.path}</p>

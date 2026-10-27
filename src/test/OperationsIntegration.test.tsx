@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, expect, it, vi } from "vitest";
 import App from "../App";
@@ -83,6 +83,46 @@ it("retains service identity and controls across History and Diagnostics tabs", 
   await userEvent.click(screen.getByRole("tab", { name: "Output" }));
   expect(screen.getByRole("region", { name: "Service logs" })).toBeVisible();
 });
+it("navigates service tabs by keyboard and associates each selected panel", async () => {
+  const user = userEvent.setup();
+  render(<App />);
+  await user.click(await screen.findByRole("button", { name: /One Running/ }));
+  const tablist = screen.getByRole("tablist", { name: "Service views" });
+  const tabs = within(tablist).getAllByRole("tab");
+  expect(tabs.map((tab) => tab.tabIndex)).toEqual([0, -1, -1, -1]);
+  expect(new Set(tabs.map((tab) => tab.id)).size).toBe(4);
+  expect(new Set(tabs.map((tab) => tab.getAttribute("aria-controls"))).size).toBe(4);
+  expect(within(tablist).queryByRole("button", { name: "Open in log workspace" })).not.toBeInTheDocument();
+  const check = (name: string) => {
+    const tab = within(tablist).getByRole("tab", { name });
+    expect(tab).toHaveFocus();
+    expect(tab).toHaveAttribute("aria-selected", "true");
+    expect(tabs.filter((item) => item.tabIndex === 0)).toEqual([tab]);
+    const panel = screen.getByRole("tabpanel", { name });
+    expect(panel.id).toBe(tab.getAttribute("aria-controls"));
+    expect(panel).toHaveAttribute("aria-labelledby", tab.id);
+  };
+  tabs[0].focus();
+  check("Output");
+  await user.keyboard("{ArrowRight}");
+  check("Settings");
+  await user.type(screen.getByLabelText("Service name"), " draft");
+  within(tablist).getByRole("tab", { name: "Settings" }).focus();
+  await user.keyboard("{ArrowRight}");
+  check("History");
+  await user.keyboard("{End}");
+  check("Diagnostics");
+  await user.keyboard("{ArrowRight}");
+  check("Output");
+  await user.keyboard("{ArrowLeft}");
+  check("Diagnostics");
+  await user.keyboard("{Home}");
+  check("Output");
+  await user.keyboard("{ArrowRight}");
+  check("Settings");
+  expect(screen.getByLabelText("Service name")).toHaveValue("One draft");
+});
+
 it("opens the configured service URL through the native API", async () => {
   render(<App />);
   await userEvent.click(await screen.findByRole("button", { name: /One Running/ }));
