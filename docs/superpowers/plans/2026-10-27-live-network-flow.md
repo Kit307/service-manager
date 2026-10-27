@@ -40,7 +40,7 @@
 
 **Interfaces:**
 - Consumes: existing `RelayTarget` and `VpnRelaySet::start(Vec<RelayTarget>)`.
-- Produces: `RelayTrafficSnapshot { route: VpnRoute, tx_bytes: u64, rx_bytes: u64, active_connections: u64 }` and `VpnRelaySet::traffic() -> Vec<RelayTrafficSnapshot>`.
+- Produces: cloneable `RelayTraffic` handles with private shared counters, `RelayTraffic::snapshot() -> RelayTrafficSnapshot`, and `VpnRelaySet::traffic() -> Vec<RelayTraffic>`. `RelayTrafficSnapshot` contains `{ route: VpnRoute, tx_bytes: u64, rx_bytes: u64, active_connections: u64 }`.
 
 - [ ] **Step 1: Write failing relay telemetry tests**
 
