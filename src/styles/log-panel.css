@@ -48,7 +48,7 @@
   cursor: pointer;
 }
 .log-stream-picker:hover { background: var(--selected); color: var(--ink); }
-.log-stream-picker:focus-within { outline: 2px solid var(--selected-ink); outline-offset: 1px; }
+.log-stream-picker:focus-within { outline: 2px solid var(--focus); outline-offset: 1px; box-shadow: 0 0 0 3px var(--focus-halo); }
 .log-panel-compact .button-row { gap: 2px; flex-shrink: 0; }
 .log-panel-compact .button-row button {
   position: relative;

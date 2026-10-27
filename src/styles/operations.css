@@ -1,4 +1,4 @@
-.operations-panel { flex: 1; padding: 24px; overflow: auto; min-height: 0; display: grid; align-content: start; gap: 20px; }
+.operations-panel { flex: 1; padding: 24px; overflow: auto; min-height: 0; display: grid; align-content: start; gap: 20px; background: var(--reading-surface); }
 .operations-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .operations-heading h2 { margin: 0; font-size: 16px; }
 .operations-panel h3 { font-size: 14px; margin: 0 0 12px; }
@@ -17,7 +17,7 @@
 .port-listener span, .failure-alert p { font-size: 12px; margin: 0; overflow-wrap: anywhere; }
 .context-label { display: grid; gap: 8px; margin: 12px 0; }
 .context-label textarea { color: var(--ink); background: var(--log-bg); border: 1px solid var(--line); border-radius: 8px; padding: 12px; resize: vertical; width: 100%; box-sizing: border-box; font-family: monospace; font-size: 12px; }
-.failure-alerts { background: var(--surface); max-height: 240px; overflow: auto; padding: 12px 20px; border-bottom: 1px solid var(--line); }
+.failure-alerts { background: var(--reading-surface); max-height: 240px; overflow: auto; padding: 12px 20px; border-bottom: 1px solid var(--line); }
 .dependency-options { display: grid; gap: 8px; }
 .dependency-options label { display: flex; flex-direction: row; align-items: center; gap: 8px; }
 .dependency-options input { width: auto; }

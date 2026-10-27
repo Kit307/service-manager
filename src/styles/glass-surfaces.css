@@ -130,6 +130,10 @@ button:disabled {
   backdrop-filter: blur(16px) saturate(115%);
 }
 
+:is(.command-display, .group-service-card, .endpoint, .run-list > button) {
+  background: var(--reading-surface);
+}
+
 .service-row.selected,
 .ai-nav.selected {
   background: var(--control-glass-hover);
@@ -140,18 +144,18 @@ button:disabled {
 .log-toolbar,
 .log-filters,
 .log-status {
-  background: var(--control-glass);
+  background: var(--reading-surface);
 }
 
 .run-list > button {
   border: 1px solid var(--control-edge);
   border-radius: 14px;
-  background: var(--control-glass);
+  background: var(--reading-surface);
   box-shadow: inset 0 1px 0 var(--control-rim);
 }
 
 .run-list > button[aria-pressed="true"] {
-  background: var(--control-glass-hover);
+  background: var(--reading-surface);
   border-color: var(--selected-ink);
   box-shadow: var(--control-depth);
 }

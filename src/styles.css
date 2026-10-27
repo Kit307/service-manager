@@ -12,6 +12,9 @@
   --glass-shadow: 0 4px 20px rgb(24 32 48 / 5%), inset 0 1px 0 var(--glass-highlight);
   --sidebar: rgb(247 248 250 / 12%);
   --surface: rgb(255 255 255 / 58%);
+  --reading-surface: #fcfdff;
+  --focus: #005fcc;
+  --focus-halo: #fff;
   --hover: rgb(220 224 230 / 65%);
   --line: rgb(103 116 136 / 20%);
   --ink: oklch(0.24 0.005 280);
@@ -40,6 +43,9 @@
   --glass-shadow: 0 4px 20px rgb(0 0 0 / 12%), inset 0 1px 0 var(--glass-highlight);
   --sidebar: rgb(25 29 36 / 14%);
   --surface: rgb(53 59 70 / 55%);
+  --reading-surface: #232933;
+  --focus: #9cc8ff;
+  --focus-halo: #171a20;
   --hover: rgb(92 100 115 / 46%);
   --line: rgb(191 203 224 / 18%);
   --ink: oklch(0.92 0.002 280);
@@ -66,6 +72,9 @@
     --glass-shadow: 0 4px 20px rgb(0 0 0 / 12%), inset 0 1px 0 var(--glass-highlight);
     --sidebar: rgb(25 29 36 / 14%);
     --surface: rgb(53 59 70 / 55%);
+    --reading-surface: #232933;
+    --focus: #9cc8ff;
+    --focus-halo: #171a20;
     --hover: rgb(92 100 115 / 46%);
     --line: rgb(191 203 224 / 18%);
     --ink: oklch(0.92 0.002 280);
@@ -127,8 +136,9 @@ input:focus-visible,
 textarea:focus-visible,
 select:focus-visible,
 [tabindex]:focus-visible {
-  outline: 2px solid var(--selected-ink);
+  outline: 2px solid var(--focus);
   outline-offset: 3px;
+  box-shadow: 0 0 0 5px var(--focus-halo) !important;
 }
 button svg {
   flex-shrink: 0;
@@ -370,7 +380,7 @@ pre {
   accent-color: var(--primary);
 }
 .background-opacity input:focus-visible {
-  outline: 2px solid var(--primary);
+  outline: 2px solid var(--focus);
   outline-offset: 3px;
 }
 .sidebar-footer > span,
@@ -681,6 +691,7 @@ pre {
   display: flex;
   flex-direction: column;
   min-height: 160px;
+  background: var(--reading-surface);
 }
 .log-toolbar {
   display: flex;
@@ -919,7 +930,7 @@ label {
   font-weight: 550;
 }
 input:not([type="radio"]):not([type="checkbox"]) {
-  background: var(--surface);
+  background: var(--reading-surface);
   color: var(--ink);
   border: 1px solid var(--line);
   border-radius: 6px;
@@ -932,7 +943,7 @@ input::placeholder {
   opacity: 1;
 }
 input:read-only {
-  background: var(--sidebar);
+  background: var(--reading-surface);
   color: var(--muted);
 }
 input[type="checkbox"],
@@ -1188,11 +1199,11 @@ label small {
   padding: 12px;
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: var(--surface);
+  background: var(--reading-surface);
   color: var(--ink);
 }
 .credential textarea:focus-visible {
-  outline: 2px solid var(--primary);
+  outline: 2px solid var(--focus);
   outline-offset: 2px;
 }
 
@@ -1393,3 +1404,11 @@ label small {
 .settings-section .form-section > label { margin-top: 0; }
 .form-actions { display: flex; flex-wrap: wrap; gap: 10px; }
 .group-editor .form-actions .danger-text { margin-left: auto; }
+
+.service-form, .ai-page { background: var(--reading-surface); }
+.runtime-error { background: var(--red-bg); border-radius: 8px; padding: 8px 12px; }
+
+@media (forced-colors: active) {
+  :root { --focus: Highlight !important; }
+  :is(button, input, textarea, select, [tabindex]):focus-visible { box-shadow: none !important; }
+}
