@@ -53,7 +53,7 @@ it("cancels a pending sequence without stopping already started services", async
   vi.mocked(api.controlSequence).mockReturnValueOnce(new Promise((_resolve, fail) => { reject = fail; }));
   render(<App />);
   await userEvent.click(await screen.findByRole("button", { name: "Fixture group" }));
-  await userEvent.click(screen.getByRole("button", { name: "Run all" }));
+  await userEvent.click(screen.getByRole("button", { name: "Run all services" }));
   const cancel = await screen.findByRole("button", { name: "Cancel sequence" });
   expect(cancel).toBeEnabled();
   await userEvent.click(cancel);

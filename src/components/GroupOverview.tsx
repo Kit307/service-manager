@@ -52,6 +52,7 @@ export function GroupOverview({
           <div className="button-row group-actions">
             <button
               className="primary"
+              aria-label="Run all services"
               disabled={busy || active === services.length}
               onClick={() => onControl("start")}
             >
@@ -60,6 +61,7 @@ export function GroupOverview({
             </button>
             <button
               className="secondary"
+              aria-label="Stop all services"
               disabled={busy || !active}
               onClick={() => onControl("stop")}
             >
@@ -68,6 +70,7 @@ export function GroupOverview({
             </button>
             <button
               className="secondary"
+              aria-label="Restart all services"
               disabled={busy || !services.length}
               onClick={() => onControl("restart")}
             >
@@ -83,7 +86,7 @@ export function GroupOverview({
         <p className="overview-note">
           Runs in dependency order and reuses active services. Restart stops in reverse order. A failure cancels later starts.
         </p>
-        <div className="group-service-list">
+        <section className="group-service-list" aria-label="Group services">
           {services.map((entry) => {
             const { project, service: s } = entry;
             const key = refKey(serviceRef(entry));
@@ -141,7 +144,7 @@ export function GroupOverview({
               group settings. Adding a folder never runs its commands.
             </p>
           )}
-        </div>
+        </section>
       </div>
     </div>
   );

@@ -88,10 +88,11 @@ export function ServiceSidebar({
     const { project, service } = entry;
     const key = refKey(serviceRef(entry));
     const state = project.runtime[service.id]?.state ?? "stopped";
+    const label = stateLabel(state);
     return (
       <button
         key={key}
-        aria-label={`${service.name} ${stateLabel(state)}`}
+        aria-label={`${service.name} ${label}`}
         className={`service-row ${selected === key ? "selected" : ""}`}
         title={`${project.path}/${service.cwd} · Drag to a group, Ungrouped or Log workspace`}
         draggable={false}
@@ -132,9 +133,9 @@ export function ServiceSidebar({
         <span className="drag-grip">
           <Icon name="grip" size={12} />
         </span>
-        <span className={`status-dot ${state}`} />
+        <span className={`status-dot ${state}`} aria-hidden="true" />
         <span className="service-name">{service.name}</span>
-        <span className="service-type">{stateLabel(state)}</span>
+        <span className="service-state">{label}</span>
       </button>
     );
   }

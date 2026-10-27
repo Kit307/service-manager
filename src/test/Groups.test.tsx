@@ -94,6 +94,13 @@ it("shows existing services directly without a project row", async () => {
     "plus",
   );
 });
+it("shows the service state as text in its accessible row", async () => {
+  data.projects[0].config.services[0].name = "Merchant Portal";
+  data.projects[0].runtime.web = { state: "ready", health: "notConfigured" };
+  render(<App />);
+  const row = await screen.findByRole("button", { name: /Merchant Portal.*Ready/i });
+  expect(within(row).getByText("Ready")).toBeVisible();
+});
 it("removes only the group and retains its services", async () => {
   const user = userEvent.setup();
   render(<App />);
@@ -122,6 +129,20 @@ it("creates a group with existing service refs", async () => {
       { projectId: "p", serviceId: "web" },
     ]),
   );
+});
+it("supports changing group membership with the keyboard", async () => {
+  const user = userEvent.setup();
+  render(<App />);
+  const edit = await screen.findByRole("button", { name: "Edit group Demo" });
+  edit.focus();
+  await user.keyboard("{Enter}");
+  const member = screen.getByRole("checkbox", { name: /Web/ });
+  member.focus();
+  await user.keyboard("[Space]");
+  const save = screen.getByRole("button", { name: "Save group" });
+  save.focus();
+  await user.keyboard("{Enter}");
+  await waitFor(() => expect(api.saveGroup).toHaveBeenCalledWith("g", "Demo", []));
 });
 it("preserves the editor and services when group persistence fails", async () => {
   const user = userEvent.setup();

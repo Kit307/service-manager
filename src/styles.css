@@ -197,7 +197,7 @@ pre {
   border-right: 1px solid var(--line);
   display: flex;
   flex-direction: column;
-  padding: 22px 12px 0;
+  padding: 24px 8px 0;
   box-shadow: inset -1px 0 0 var(--glass-highlight);
   -webkit-backdrop-filter: blur(16px) saturate(110%);
   backdrop-filter: blur(16px) saturate(110%);
@@ -249,7 +249,7 @@ pre {
   box-shadow: var(--glass-shadow);
   height: 34px;
   padding: 0 10px;
-  margin: 25px 0 28px;
+  margin: 24px 0;
   font-size: 12px;
   font-weight: 500;
 }
@@ -268,7 +268,7 @@ pre {
   color: var(--muted);
   font-size: 11px;
   font-weight: 550;
-  margin-bottom: 12px;
+  margin-bottom: 8px;
 }
 .sidebar-label span {
   font-variant-numeric: tabular-nums;
@@ -293,8 +293,9 @@ pre {
 }
 .project-row {
   width: 100%;
-  padding: 8px 5px;
-  gap: 7px;
+  min-height: 32px;
+  padding: 8px 4px;
+  gap: 8px;
   justify-content: flex-start;
   font-weight: 560;
   font-size: 12px;
@@ -302,23 +303,25 @@ pre {
 .project-row span {
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .project-row svg {
   color: var(--muted);
 }
 .service-row {
   width: 100%;
-  min-height: 33px;
+  min-height: 32px;
   justify-content: flex-start;
-  padding: 7px 10px 7px 28px;
+  padding: 4px 8px 4px 24px;
   border-radius: 6px;
-  gap: 9px;
+  gap: 8px;
   font-size: 12px;
 }
 .service-row .service-name {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .service-row:hover,
 .add-service-row:hover,
@@ -329,16 +332,16 @@ pre {
 .ai-nav.selected {
   background: var(--selected);
   color: var(--selected-ink);
-  box-shadow: var(--glass-shadow);
+  box-shadow: inset 3px 0 var(--ops-focus);
 }
-.service-type {
+.service-state {
   margin-left: auto;
-  font-size: 9px;
+  font-size: 10px;
   color: var(--muted);
   flex-shrink: 0;
 }
-.service-row:hover .service-type,
-.service-row.selected .service-type {
+.service-row:hover .service-state,
+.service-row.selected .service-state {
   opacity: 1;
 }
 .add-service-row {
@@ -1221,7 +1224,7 @@ label small {
 }
 
 .workspace-group {
-  margin-bottom: 10px;
+  margin-bottom: 8px;
 }
 .group-header .project-row {
   padding-left: 2px;
@@ -1241,7 +1244,7 @@ label small {
   border-left: 1px solid var(--line);
 }
 .group-members .service-row {
-  padding-left: 14px;
+  padding-left: 8px;
 }
 .disclosure {
   flex-shrink: 0;
@@ -1410,3 +1413,6 @@ label small {
     animation-iteration-count: 1 !important;
   }
 }
+
+.sidebar .icon-button,
+.sidebar .open-folder { border: 1px solid var(--muted); }

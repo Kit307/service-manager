@@ -102,7 +102,7 @@ it("Run all sends the selected group including active readiness dependencies", a
   await user.click(
     await screen.findByRole("button", { name: "Example group" }),
   );
-  await user.click(screen.getByRole("button", { name: "Run all" }));
+  await user.click(screen.getByRole("button", { name: "Run all services" }));
   await waitFor(() =>
     expect(api.controlSequence).toHaveBeenCalledWith([
       { projectId: "fixture", serviceId: "one" },
@@ -120,7 +120,7 @@ it("does not start anything if the group trust review is canceled", async () => 
   await user.click(
     await screen.findByRole("button", { name: "Example group" }),
   );
-  await user.click(screen.getByRole("button", { name: "Run all" }));
+  await user.click(screen.getByRole("button", { name: "Run all services" }));
   expect(confirmAction).toHaveBeenCalled();
   expect(api.control).not.toHaveBeenCalled();
   expect(api.controlSequence).not.toHaveBeenCalled();
@@ -131,7 +131,7 @@ it("reports fail-fast sequence errors without falling back to individual control
   const user = userEvent.setup();
   render(<App />);
   await user.click(await screen.findByRole("button", { name: "Example group" }));
-  await user.click(screen.getByRole("button", { name: "Restart all" }));
+  await user.click(screen.getByRole("button", { name: "Restart all services" }));
   expect(await screen.findByRole("alert")).toHaveTextContent("Fixture readiness failed; sequence stopped");
   expect(api.controlSequence).toHaveBeenCalledExactlyOnceWith([
     { projectId: "fixture", serviceId: "one" },
@@ -146,7 +146,7 @@ it("Stop all touches only active services in the selected group", async () => {
   await user.click(
     await screen.findByRole("button", { name: "Example group" }),
   );
-  await user.click(screen.getByRole("button", { name: "Stop all" }));
+  await user.click(screen.getByRole("button", { name: "Stop all services" }));
   await waitFor(() =>
     expect(api.controlSequence).toHaveBeenCalledWith([
       { projectId: "fixture", serviceId: "one" },
@@ -166,7 +166,7 @@ it("completes every trust review before trusting or running a batch", async () =
   await user.click(
     await screen.findByRole("button", { name: "Example group" }),
   );
-  await user.click(screen.getByRole("button", { name: "Restart all" }));
+  await user.click(screen.getByRole("button", { name: "Restart all services" }));
   await waitFor(() => expect(confirmAction).toHaveBeenCalledTimes(2));
   expect(api.trustService).not.toHaveBeenCalled();
   expect(api.control).not.toHaveBeenCalled();
@@ -182,7 +182,7 @@ it("aborts lifecycle requests when a reviewed revision becomes stale", async () 
   await user.click(
     await screen.findByRole("button", { name: "Example group" }),
   );
-  await user.click(screen.getByRole("button", { name: "Restart all" }));
+  await user.click(screen.getByRole("button", { name: "Restart all services" }));
   expect(await screen.findByRole("alert")).toHaveTextContent(
     "Configuration changed while reviewing",
   );
@@ -207,4 +207,14 @@ it("keeps compact card metadata discoverable and opens the selected service logs
   expect(screen.getByRole("status")).toHaveTextContent("Port 4200 is already in use.");
   await userEvent.setup().click(screen.getByRole("button", { name: "View logs for Two" }));
   expect(onService).toHaveBeenCalledExactlyOnceWith(services[1]);
+});
+
+it("exposes the operational service list and bulk controls", () => {
+  const services = project.config.services.map((service) => ({ project, service }));
+  render(<GroupOverview name="Example group" services={services} busy={false} results={[]}
+    onControl={vi.fn()} onService={vi.fn()} onAdd={vi.fn()} />);
+  expect(screen.getByRole("region", { name: "Group services" })).toBeVisible();
+  expect(screen.getByRole("button", { name: "Run all services" })).toBeVisible();
+  expect(screen.getByRole("button", { name: "Restart all services" })).toBeVisible();
+  expect(screen.getByRole("button", { name: "Stop all services" })).toBeVisible();
 });
