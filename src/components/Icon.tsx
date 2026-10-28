@@ -1,5 +1,6 @@
 import type { CSSProperties } from "react";
 const paths = {
+  network: <><rect x="9" y="3" width="6" height="5" rx="1" /><rect x="2" y="16" width="6" height="5" rx="1" /><rect x="16" y="16" width="6" height="5" rx="1" /><path d="M12 8v4M5 16v-4h14v4" /></>,
   folder: (
     <>
       <path d="M3 6h6l2 2h10v11H3z" />

@@ -30,3 +30,10 @@ it("exposes the native ops shell landmarks", () => {
   expect(screen.getByRole("main")).toHaveClass("ops-workspace");
   expect(screen.getByRole("banner", { name: "Workspace context" })).toBeVisible();
 });
+
+it("opens Live Network from the sidebar and shows its breadcrumb", async () => {
+  render(<App />);
+  await userEvent.click(screen.getByRole("button", { name: "Live Network" }));
+  expect(screen.getByRole("banner", { name: "Workspace context" })).toHaveTextContent("Live Network");
+  expect(screen.getByRole("heading", { name: "Live Network" })).toBeVisible();
+});
