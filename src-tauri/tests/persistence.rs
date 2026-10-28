@@ -1,4 +1,62 @@
 use service_manager::{model::*, project::ProjectStore};
+
+fn external_active_route_change_is_rejected(remove: bool) {
+    let root = tempfile::tempdir().unwrap();
+    let state = tempfile::tempdir().unwrap();
+    let mut store = ProjectStore::new(state.path().into()).unwrap();
+    let p = store.open(root.path().to_str().unwrap()).unwrap();
+    let config: ProjectConfig = serde_json::from_value(serde_json::json!({
+        "schemaVersion":1,"services":[{"id":"web","name":"Web","cwd":".","type":"command","command":"sleep 1",
+        "vpnRoutes":[{"profileId":"ac9c00d2-4810-43b6-a8e9-b9f07fecf6ec","localPort":12001,"remoteHost":"old.test","remotePort":443}]}]
+    })).unwrap();
+    store.save(&p.id, config.clone(), "absent").unwrap();
+    store.projects.get_mut(&p.id).unwrap().runtime.insert(
+        "web".into(),
+        Snapshot {
+            state: "running".into(),
+            ..Snapshot::default()
+        },
+    );
+    let mut changed = config;
+    if remove {
+        changed.services[0].vpn_routes.clear();
+    } else {
+        changed.services[0].vpn_routes[0].remote_host = "new.test".into();
+    }
+    std::fs::write(
+        root.path().join(".service-manager/project.json"),
+        serde_json::to_vec(&changed).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(store.refresh(&p.id).err().unwrap().code, "CONFIG_CONFLICT");
+    assert_eq!(
+        store.projects[&p.id].config.services[0].vpn_routes[0].remote_host,
+        "old.test"
+    );
+    store
+        .projects
+        .get_mut(&p.id)
+        .unwrap()
+        .runtime
+        .get_mut("web")
+        .unwrap()
+        .state = "stopped".into();
+    assert_eq!(
+        store.refresh(&p.id).unwrap().config.services[0].vpn_routes,
+        changed.services[0].vpn_routes
+    );
+}
+
+#[test]
+fn external_active_route_edit_is_rejected_until_stop() {
+    external_active_route_change_is_rejected(false);
+}
+
+#[test]
+fn external_active_route_removal_is_rejected_until_stop() {
+    external_active_route_change_is_rejected(true);
+}
+
 #[test]
 fn removing_project_persists_without_deleting_files_or_restoring_old_trust() {
     let root = tempfile::tempdir().unwrap();

@@ -27,6 +27,31 @@ pub struct Project {
     pub trusted: Vec<String>,
     pub runtime: HashMap<String, Snapshot>,
 }
+
+fn ensure_active_routes_unchanged(
+    project: &Project,
+    config: &ProjectConfig,
+    code: &str,
+) -> Result<()> {
+    for previous in &project.config.services {
+        if project
+            .runtime
+            .get(&previous.id)
+            .is_some_and(Snapshot::active)
+            && config
+                .services
+                .iter()
+                .find(|service| service.id == previous.id)
+                .is_none_or(|service| service.vpn_routes != previous.vpn_routes)
+        {
+            return Err(AppError::new(
+                code,
+                "Stop the service before changing its VPN routes or removing it.",
+            ));
+        }
+    }
+    Ok(())
+}
 #[derive(Clone, Default, Serialize, Deserialize)]
 pub struct PrivateState {
     pub projects: HashMap<String, String>,
@@ -389,6 +414,9 @@ impl ProjectStore {
         }) {
             return Err(AppError::new("CONFIG_CONFLICT", "An active service was removed externally. Stop the service before reloading this project's configuration."));
         }
+        if let Some(project) = self.projects.get(&id) {
+            ensure_active_routes_unchanged(project, &config, "CONFIG_CONFLICT")?;
+        }
         let trust = self.private.trust.get(&id);
         let trusted = config
             .services
@@ -469,6 +497,7 @@ impl ProjectStore {
         if project.revision != revision {
             return Err(AppError::new("CONFIG_CONFLICT", "Configuration changed externally. Reload the project before saving; your draft was not written."));
         }
+        ensure_active_routes_unchanged(&project, &config, "OPERATION_IN_PROGRESS")?;
         let root = Path::new(&project.path);
         validate(root, &config)?;
         let bytes = serde_json::to_vec_pretty(&config)

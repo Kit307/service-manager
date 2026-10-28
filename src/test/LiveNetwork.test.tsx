@@ -17,6 +17,40 @@ const workspace: Workspace = {
 const sample: NetworkTraffic = { projectId: "p", serviceId: "a", runId: "run", profileId: "vpn", localPort: 1001, remoteHost: "db.local", remotePort: 5432, txBytes: 20, rxBytes: 10, activeConnections: 1 };
 beforeEach(() => { traffic.samples = []; traffic.activity = {}; traffic.error = null; });
 
+it("explains that relay traffic can come from any local client", () => {
+  render(<LiveNetwork workspace={workspace} />);
+  expect(screen.getByText(/any local client.*service-configured loopback relay/i)).toBeVisible();
+  expect(screen.getByText(/not verified as service-process traffic/i)).toBeVisible();
+});
+
+it("keeps stopping distinct while current relay traffic exists, then clears it after stop", () => {
+  traffic.samples = [sample]; traffic.activity = { "p/a/run/1001": { tx: true, rx: true } };
+  const changed = structuredClone(workspace);
+  changed.projects[0].runtime.a.state = "stopping";
+  const { rerender } = render(<LiveNetwork workspace={changed} />);
+  expect(screen.getAllByRole("button", { name: /db.local:5432/ })[0]).toHaveTextContent("Stopping");
+  expect(within(screen.getByLabelText("Route details")).getByText("20 B")).toBeVisible();
+  expect(within(screen.getByLabelText("Route details")).getByText("10 B")).toBeVisible();
+  expect(document.querySelectorAll(".network-pulse")).toHaveLength(2);
+  traffic.samples = []; traffic.activity = {};
+  rerender(<LiveNetwork workspace={changed} />);
+  expect(screen.getAllByRole("button", { name: /db.local:5432/ })[0]).toHaveTextContent("Stopping");
+  expect(document.querySelectorAll(".network-pulse")).toHaveLength(0);
+  expect(within(screen.getByLabelText("Route details")).getAllByText("—")).toHaveLength(3);
+  changed.projects[0].runtime.a.state = "stopped";
+  rerender(<LiveNetwork workspace={changed} />);
+  expect(screen.getAllByRole("button", { name: /db.local:5432/ })[0]).toHaveTextContent("Stopped");
+  expect(document.querySelectorAll(".network-pulse")).toHaveLength(0);
+  expect(within(screen.getByLabelText("Route details")).getAllByText("—")).toHaveLength(3);
+});
+
+it("distinguishes a failed route from a stopped route", () => {
+  const changed = structuredClone(workspace);
+  changed.projects[0].runtime.a.state = "failed";
+  render(<LiveNetwork workspace={changed} />);
+  expect(screen.getAllByRole("button", { name: /db.local:5432/ })[0]).toHaveTextContent("Failed");
+});
+
 it("keeps configured and stopped routes neutral, and identifies unsupported services", () => {
   traffic.samples = [sample];
   render(<LiveNetwork workspace={workspace} />);

@@ -14,7 +14,7 @@
 
 - Count only payload bytes successfully written after CONNECT succeeds; never count handshake bytes.
 - Never infer activity from service state, VPN state, tunnel count, configured routes, timestamps, or color.
-- Direct native, legacy Docker VPN, DNS, UDP, and external-process traffic remain `Not observable`.
+- Direct native, legacy Docker VPN, DNS, UDP, and traffic outside the configured relays remain `Not observable`. Relay counters include all local clients and do not verify process attribution.
 - Telemetry is memory-only, desktop-only, bounded to current native relay routes, and contains no credentials or logs.
 - Poll only while the Live Network page is mounted; interval is 1 second and requests never overlap.
 - Initial, missing, failed, decreased-counter, and changed-run samples establish a baseline without pulses.

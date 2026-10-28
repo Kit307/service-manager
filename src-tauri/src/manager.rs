@@ -375,7 +375,59 @@ impl Manager {
         })
     }
 
+    async fn finish_native_preflight(
+        &self,
+        project: &str,
+        service: &str,
+        terminal: Snapshot,
+    ) -> Result<Snapshot> {
+        // Keep the run active until history finalization finishes so shutdown cannot race it.
+        self.finish_history(project, service, &terminal).await;
+        let mut store = self.store.lock().await;
+        let current = store
+            .projects
+            .get_mut(project)
+            .and_then(|project| project.runtime.get_mut(service))
+            .ok_or_else(|| AppError::new("SERVICE_NOT_FOUND", "Service does not exist."))?;
+        if current.run_id != terminal.run_id || !current.active() {
+            return Err(AppError::new(
+                "OPERATION_IN_PROGRESS",
+                "The managed run changed during VPN setup.",
+            ));
+        }
+        current.state = terminal.state;
+        current.activity = terminal.activity;
+        Ok(current.clone())
+    }
+
     pub async fn start(&self, project: &str, service: &str, actor: &str) -> Result<Snapshot> {
+        let (caller, cancelled) = tokio::sync::oneshot::channel::<()>();
+        let manager = self.clone();
+        let project = project.to_owned();
+        let service = service.to_owned();
+        let actor = actor.to_owned();
+        let task = tokio::spawn(async move {
+            manager
+                .start_owned(&project, &service, &actor, cancelled)
+                .await
+        });
+        let result = task.await.map_err(|_| {
+            AppError::new(
+                "PROCESS_START_FAILED",
+                "The service start task could not complete.",
+            )
+        });
+        drop(caller);
+        result?
+    }
+
+    async fn start_owned(
+        &self,
+        project: &str,
+        service: &str,
+        actor: &str,
+        mut cancelled: tokio::sync::oneshot::Receiver<()>,
+    ) -> Result<Snapshot> {
         let mut store = self.store.lock().await;
         if self.shutting_down.load(Ordering::SeqCst) {
             return Err(AppError::new(
@@ -430,6 +482,15 @@ impl Manager {
             }
         }
         let cwd = inside(Path::new(&p.path), &definition.cwd)?;
+        if matches!(
+            cancelled.try_recv(),
+            Err(tokio::sync::oneshot::error::TryRecvError::Closed)
+        ) {
+            return Err(AppError::new(
+                "OPERATION_CANCELLED",
+                "Service start was cancelled.",
+            ));
+        }
         if uses_compose_runner(&definition) {
             let key = format!("{project}/{service}");
             let owner = store
@@ -544,9 +605,16 @@ impl Manager {
                 project_id: project.into(),
                 service_id: service.into(),
             };
-            let prepared = self
-                .prepare_native_vpn(&definition.vpn_routes, &user, &run)
-                .await;
+            let prepared = self.prepare_native_vpn(&definition.vpn_routes, &user, &run);
+            tokio::pin!(prepared);
+            let (prepared, cancelled_preflight) = tokio::select! {
+                biased;
+                _ = &mut cancelled => {
+                    self.stop(project, service).await?;
+                    (prepared.await, true)
+                }
+                result = &mut prepared => (result, false),
+            };
             store = self.store.lock().await;
             let current = store
                 .projects
@@ -558,6 +626,14 @@ impl Manager {
                     "OPERATION_IN_PROGRESS",
                     "The managed run changed during VPN setup.",
                 ));
+            }
+            if !cancelled_preflight
+                && matches!(
+                    cancelled.try_recv(),
+                    Err(tokio::sync::oneshot::error::TryRecvError::Closed)
+                )
+            {
+                current.state = "stopping".into();
             }
             route_session = match prepared {
                 Ok(session) if current.state != "stopping" => Some(session),
@@ -578,20 +654,22 @@ impl Manager {
                             "The managed run changed during VPN setup.",
                         ));
                     }
-                    current.state = "stopped".into();
-                    current.activity = "Stopped during VPN setup".into();
-                    let terminal = current.clone();
+                    let mut terminal = current.clone();
+                    terminal.state = "stopped".into();
+                    terminal.activity = "Stopped during VPN setup".into();
                     drop(store);
-                    self.finish_history(project, service, &terminal).await;
-                    return Ok(terminal);
+                    return self
+                        .finish_native_preflight(project, service, terminal)
+                        .await;
                 }
                 Err(error) => {
-                    current.state = "failed".into();
                     current.error = Some(error.message.clone());
-                    current.activity = "VPN relay setup failed".into();
-                    let terminal = current.clone();
+                    let mut terminal = current.clone();
+                    terminal.state = "failed".into();
+                    terminal.activity = "VPN relay setup failed".into();
                     drop(store);
-                    self.finish_history(project, service, &terminal).await;
+                    self.finish_native_preflight(project, service, terminal)
+                        .await?;
                     return Err(error);
                 }
             };
@@ -612,7 +690,30 @@ impl Manager {
                     "Could not start the command. Check its working folder and shell.",
                 );
                 if let Some(session) = route_session.take() {
+                    drop(store);
                     session.shutdown().await;
+                    let mut store = self.store.lock().await;
+                    let current = store
+                        .projects
+                        .get_mut(project)
+                        .and_then(|project| project.runtime.get_mut(service))
+                        .ok_or_else(|| {
+                            AppError::new("SERVICE_NOT_FOUND", "Service does not exist.")
+                        })?;
+                    if current.run_id.as_deref() != Some(&run) {
+                        return Err(AppError::new(
+                            "OPERATION_IN_PROGRESS",
+                            "The managed run changed during VPN setup.",
+                        ));
+                    }
+                    current.error = Some(error.message.clone());
+                    let mut terminal = current.clone();
+                    terminal.state = "failed".into();
+                    terminal.activity = "Command could not start".into();
+                    drop(store);
+                    self.finish_native_preflight(project, service, terminal)
+                        .await?;
+                    return Err(error);
                 }
                 let snapshot = Snapshot {
                     state: "failed".into(),
@@ -1562,6 +1663,427 @@ async fn drain(
 mod tests {
     use super::*;
     use tokio::io::AsyncWriteExt;
+
+    struct TestProcess(Option<u32>);
+    impl Drop for TestProcess {
+        fn drop(&mut self) {
+            if let Some(pid) = self.0 {
+                let _ = killpg(Pid::from_raw(pid as i32), Signal::SIGKILL);
+            }
+        }
+    }
+
+    async fn routed_fixture() -> (
+        tempfile::TempDir,
+        tempfile::TempDir,
+        Manager,
+        String,
+        VpnRoute,
+    ) {
+        let root = tempfile::tempdir().unwrap();
+        let state = tempfile::tempdir().unwrap();
+        let manager = Manager::new(state.path().into()).unwrap();
+        let config = root.path().join("fixture.ovpn");
+        std::fs::write(&config, b"client\n").unwrap();
+        let profile = manager
+            .vpns
+            .import(crate::vpn::VpnImport {
+                name: "fixture".into(),
+                config_path: config.to_string_lossy().into(),
+                username: String::new(),
+                password: String::new(),
+                key_passphrase: String::new(),
+                published_ports: vec![],
+                outbound_subnets: vec![],
+                health_target: String::new(),
+                dns_address: String::new(),
+                health_icmp_target: String::new(),
+            })
+            .await
+            .unwrap();
+        let project = manager.open(root.path().to_str().unwrap()).await.unwrap();
+        let port = std::net::TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port();
+        let route = VpnRoute {
+            profile_id: profile.id,
+            remote_host: "example.test".into(),
+            remote_port: 443,
+            local_port: port,
+        };
+        let definition = ServiceDefinition {
+            id: "fixture".into(),
+            name: "Fixture".into(),
+            cwd: ".".into(),
+            kind: ServiceKind::Command {
+                command: "exec sleep 30".into(),
+            },
+            env_file: None,
+            health_check: None,
+            ports: vec![],
+            url: None,
+            depends_on: vec![],
+            vpn: None,
+            vpn_routes: vec![route.clone()],
+        };
+        manager
+            .save(&project.id, definition, "absent", true)
+            .await
+            .unwrap();
+        (root, state, manager, project.id, route)
+    }
+
+    fn prepare_fixture(manager: &Manager, route: &VpnRoute, proxy: SocketAddr) {
+        *manager.prepared_test_session.lock().unwrap() =
+            Some(vec![crate::vpn_relay::RelayTarget {
+                route: route.clone(),
+                proxy,
+            }]);
+    }
+
+    async fn wait_stopped_and_archived(manager: &Manager, project: &str, run: &str) {
+        tokio::time::timeout(Duration::from_secs(3), async {
+            loop {
+                let status = manager.status(project, "fixture").await.unwrap();
+                let history = manager.run_history(project, "fixture").await.unwrap();
+                if status.state == "stopped"
+                    && history
+                        .iter()
+                        .any(|r| r.run_id == run && r.state == "stopped" && r.ended_at.is_some())
+                {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("run did not stop and finish history");
+    }
+
+    #[tokio::test]
+    async fn other_local_client_moves_counters_while_managed_worker_is_idle() {
+        use tokio::io::AsyncReadExt;
+        let (_root, _state, manager, project, route) = routed_fixture().await;
+        let proxy = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let proxy_address = proxy.local_addr().unwrap();
+        let proxy_task = tokio::spawn(async move {
+            let (mut stream, _) = proxy.accept().await.unwrap();
+            let mut request = Vec::new();
+            loop {
+                request.push(stream.read_u8().await.unwrap());
+                if request.ends_with(b"\r\n\r\n") {
+                    break;
+                }
+            }
+            stream
+                .write_all(b"HTTP/1.1 200 Connection Established\r\n\r\n")
+                .await
+                .unwrap();
+            let mut bytes = [0; 4];
+            stream.read_exact(&mut bytes).await.unwrap();
+            assert_eq!(&bytes, b"ping");
+            stream.write_all(b"pong").await.unwrap();
+        });
+        prepare_fixture(&manager, &route, proxy_address);
+        let started = manager.start(&project, "fixture", "test").await.unwrap();
+        let mut process = TestProcess(started.pid);
+        let run = started.run_id.unwrap();
+        let initial = manager.network_traffic();
+        assert_eq!((initial[0].tx_bytes, initial[0].rx_bytes), (0, 0));
+        let project_view = manager.projects().await.remove(0);
+        let mut changed = project_view.config.services[0].clone();
+        changed.vpn_routes[0].remote_host = "changed.test".into();
+        assert!(manager
+            .save(&project, changed.clone(), &project_view.revision, false)
+            .await
+            .is_err());
+        changed.vpn_routes.clear();
+        assert!(manager
+            .save(&project, changed, &project_view.revision, false)
+            .await
+            .is_err());
+        let mut client = tokio::net::TcpStream::connect((Ipv4Addr::LOCALHOST, route.local_port))
+            .await
+            .unwrap();
+        client.write_all(b"ping").await.unwrap();
+        let mut reply = [0; 4];
+        client.read_exact(&mut reply).await.unwrap();
+        assert_eq!(&reply, b"pong");
+        proxy_task.await.unwrap();
+        let sample = manager.network_traffic();
+        assert_eq!((sample[0].tx_bytes, sample[0].rx_bytes), (4, 4));
+        assert_eq!(sample[0].remote_host, "example.test");
+        assert_eq!(sample[0].run_id, run);
+        assert_eq!(
+            manager.status(&project, "fixture").await.unwrap().state,
+            "running"
+        );
+        manager.stop(&project, "fixture").await.unwrap();
+        wait_stopped_and_archived(&manager, &project, &run).await;
+        process.0 = None;
+        manager.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn active_routes_reject_api_and_external_edits_until_stopped() {
+        let (root, _state, manager, project, route) = routed_fixture().await;
+        prepare_fixture(&manager, &route, "127.0.0.1:1".parse().unwrap());
+        let started = manager.start(&project, "fixture", "test").await.unwrap();
+        let mut process = TestProcess(started.pid);
+        let run = started.run_id.unwrap();
+        let project_view = manager.projects().await.remove(0);
+        let mut edited = project_view.config.services[0].clone();
+        edited.vpn_routes[0].remote_host = "changed.test".into();
+        assert_eq!(
+            manager
+                .save(&project, edited.clone(), &project_view.revision, false)
+                .await
+                .err()
+                .unwrap()
+                .code,
+            "OPERATION_IN_PROGRESS"
+        );
+        edited.vpn_routes.clear();
+        assert_eq!(
+            manager
+                .save(&project, edited, &project_view.revision, false)
+                .await
+                .err()
+                .unwrap()
+                .code,
+            "OPERATION_IN_PROGRESS"
+        );
+        let mut unrelated = project_view.config.services[0].clone();
+        unrelated.name = "Renamed".into();
+        let saved = manager
+            .save(&project, unrelated, &project_view.revision, false)
+            .await
+            .unwrap();
+        assert_eq!(saved.config.services[0].name, "Renamed");
+        assert_eq!(manager.network_traffic()[0].remote_host, "example.test");
+        let config_path = root.path().join(".service-manager/project.json");
+        let mut external = saved.config.clone();
+        external.services[0].vpn_routes[0].remote_host = "external.test".into();
+        std::fs::write(&config_path, serde_json::to_vec(&external).unwrap()).unwrap();
+        assert_eq!(
+            manager
+                .store
+                .lock()
+                .await
+                .refresh(&project)
+                .err()
+                .unwrap()
+                .code,
+            "CONFIG_CONFLICT"
+        );
+        assert_eq!(
+            manager.projects().await[0].config.services[0].vpn_routes[0].remote_host,
+            "example.test"
+        );
+        external.services[0].vpn_routes.clear();
+        std::fs::write(&config_path, serde_json::to_vec(&external).unwrap()).unwrap();
+        assert_eq!(
+            manager
+                .store
+                .lock()
+                .await
+                .refresh(&project)
+                .err()
+                .unwrap()
+                .code,
+            "CONFIG_CONFLICT"
+        );
+        manager.stop(&project, "fixture").await.unwrap();
+        wait_stopped_and_archived(&manager, &project, &run).await;
+        process.0 = None;
+        let loaded = manager.store.lock().await.refresh(&project).unwrap();
+        assert!(loaded.config.services[0].vpn_routes.is_empty());
+        let mut restored = loaded.config.services[0].clone();
+        restored.vpn_routes.push(route);
+        let saved = manager
+            .save(&project, restored.clone(), &loaded.revision, false)
+            .await
+            .unwrap();
+        restored.vpn_routes[0].remote_host = "post-stop.test".into();
+        manager
+            .save(&project, restored, &saved.revision, false)
+            .await
+            .unwrap();
+        manager.shutdown().await.unwrap();
+    }
+
+    async fn cancelled_preflight_recovers(cancel_during_shutdown: bool) {
+        let (_root, _state, manager, project, route) = routed_fixture().await;
+        let proxy = "127.0.0.1:1".parse().unwrap();
+        prepare_fixture(&manager, &route, proxy);
+        let (ready_tx, ready_rx) = tokio::sync::oneshot::channel();
+        let (release_tx, release_rx) = tokio::sync::oneshot::channel();
+        *manager.preflight_test_barrier.lock().unwrap() = Some((ready_tx, release_rx));
+        let (shutdown_ready_tx, shutdown_ready_rx) = tokio::sync::oneshot::channel();
+        let (shutdown_release_tx, shutdown_release_rx) = tokio::sync::oneshot::channel();
+        *manager.shutdown_test_barrier.lock().unwrap() =
+            Some((shutdown_ready_tx, shutdown_release_rx));
+        let worker = manager.clone();
+        let id = project.clone();
+        let starting = tokio::spawn(async move { worker.start(&id, "fixture", "test").await });
+        ready_rx.await.unwrap();
+        let run = manager
+            .status(&project, "fixture")
+            .await
+            .unwrap()
+            .run_id
+            .unwrap();
+        if cancel_during_shutdown {
+            manager.stop(&project, "fixture").await.unwrap();
+            let _ = release_tx.send(());
+            shutdown_ready_rx.await.unwrap();
+            starting.abort();
+        } else {
+            starting.abort();
+            tokio::time::timeout(Duration::from_secs(1), async {
+                while manager.status(&project, "fixture").await.unwrap().state != "stopping" {
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await
+            .expect("cancellation did not stop preflight");
+            assert_eq!(
+                manager.stop(&project, "fixture").await.unwrap().state,
+                "stopping"
+            );
+            let _ = release_tx.send(());
+            let _ = shutdown_ready_rx.await;
+        }
+        let _ = starting.await;
+        let _ = shutdown_release_tx.send(());
+        wait_stopped_and_archived(&manager, &project, &run).await;
+        assert!(std::net::TcpListener::bind((Ipv4Addr::LOCALHOST, route.local_port)).is_ok());
+        prepare_fixture(&manager, &route, proxy);
+        let restarted = manager.restart(&project, "fixture", "test").await.unwrap();
+        let mut process = TestProcess(restarted.pid);
+        let next = restarted.run_id.unwrap();
+        assert_ne!(next, run);
+        manager.stop(&project, "fixture").await.unwrap();
+        wait_stopped_and_archived(&manager, &project, &next).await;
+        process.0 = None;
+        tokio::time::timeout(Duration::from_secs(3), manager.shutdown())
+            .await
+            .unwrap()
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn cancelled_native_preflight_still_finishes_lifecycle() {
+        cancelled_preflight_recovers(false).await;
+    }
+
+    #[tokio::test]
+    async fn cancelled_stopped_preflight_shutdown_still_finishes_lifecycle() {
+        cancelled_preflight_recovers(true).await;
+    }
+
+    #[tokio::test]
+    async fn shutdown_waits_for_cancelled_preflight_history_to_finish() {
+        let (_root, _state, manager, project, route) = routed_fixture().await;
+        prepare_fixture(&manager, &route, "127.0.0.1:1".parse().unwrap());
+        let (ready_tx, ready_rx) = tokio::sync::oneshot::channel();
+        let (release_tx, release_rx) = tokio::sync::oneshot::channel();
+        *manager.preflight_test_barrier.lock().unwrap() = Some((ready_tx, release_rx));
+        let (shutdown_ready_tx, shutdown_ready_rx) = tokio::sync::oneshot::channel();
+        let (shutdown_release_tx, shutdown_release_rx) = tokio::sync::oneshot::channel();
+        *manager.shutdown_test_barrier.lock().unwrap() =
+            Some((shutdown_ready_tx, shutdown_release_rx));
+        let worker = manager.clone();
+        let id = project.clone();
+        let starting = tokio::spawn(async move { worker.start(&id, "fixture", "test").await });
+        ready_rx.await.unwrap();
+        let run = manager
+            .status(&project, "fixture")
+            .await
+            .unwrap()
+            .run_id
+            .unwrap();
+        manager.stop(&project, "fixture").await.unwrap();
+        release_tx.send(()).unwrap();
+        shutdown_ready_rx.await.unwrap();
+        starting.abort();
+        let _ = starting.await;
+        let logs = manager.logs.lock().await;
+        let closing = manager.clone();
+        let shutdown = tokio::spawn(async move { closing.shutdown().await });
+        shutdown_release_tx.send(()).unwrap();
+        tokio::time::timeout(Duration::from_secs(3), async {
+            while std::net::TcpListener::bind((Ipv4Addr::LOCALHOST, route.local_port)).is_err() {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        assert_eq!(
+            manager.status(&project, "fixture").await.unwrap().state,
+            "stopping"
+        );
+        assert!(!shutdown.is_finished());
+        drop(logs);
+        tokio::time::timeout(Duration::from_secs(3), shutdown)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        wait_stopped_and_archived(&manager, &project, &run).await;
+    }
+
+    #[tokio::test]
+    async fn shutdown_waits_for_cancelled_spawn_failure_history_to_finish() {
+        let (root, _state, manager, project, route) = routed_fixture().await;
+        std::fs::write(
+            root.path().join("fixture.env"),
+            format!("LARGE={}\n", "x".repeat(4 * 1024 * 1024)),
+        )
+        .unwrap();
+        let saved = manager.projects().await.remove(0);
+        let mut definition = saved.config.services[0].clone();
+        definition.env_file = Some("fixture.env".into());
+        manager
+            .save(&project, definition, &saved.revision, true)
+            .await
+            .unwrap();
+        prepare_fixture(&manager, &route, "127.0.0.1:1".parse().unwrap());
+        let (shutdown_ready_tx, shutdown_ready_rx) = tokio::sync::oneshot::channel();
+        let (shutdown_release_tx, shutdown_release_rx) = tokio::sync::oneshot::channel();
+        *manager.shutdown_test_barrier.lock().unwrap() =
+            Some((shutdown_ready_tx, shutdown_release_rx));
+        let worker = manager.clone();
+        let id = project.clone();
+        let starting = tokio::spawn(async move { worker.start(&id, "fixture", "test").await });
+        shutdown_ready_rx.await.unwrap();
+        starting.abort();
+        let _ = starting.await;
+        let logs = manager.logs.lock().await;
+        let closing = manager.clone();
+        let shutdown = tokio::spawn(async move { closing.shutdown().await });
+        shutdown_release_tx.send(()).unwrap();
+        tokio::time::timeout(Duration::from_secs(3), async {
+            while std::net::TcpListener::bind((Ipv4Addr::LOCALHOST, route.local_port)).is_err() {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        assert!(manager.status(&project, "fixture").await.unwrap().active());
+        assert!(!shutdown.is_finished());
+        drop(logs);
+        tokio::time::timeout(Duration::from_secs(3), shutdown)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        let history = manager.run_history(&project, "fixture").await.unwrap();
+        assert_eq!(history[0].state, "failed");
+        assert!(history[0].ended_at.is_some());
+    }
 
     #[tokio::test]
     async fn network_traffic_tracks_current_runs_and_serializes_camel_case() {

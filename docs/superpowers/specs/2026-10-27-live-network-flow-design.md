@@ -14,14 +14,15 @@ The visualization must be evidence-based. A route is never shown as live merely 
 - Show a directional inbound pulse only after the relay's received payload-byte counter increases.
 - Return to neutral 1.5 seconds after the latest increase in that direction.
 - Show active tunnel count and cumulative relay-scoped RX/TX totals for the selected route.
-- Show services whose traffic is not attributable as `Not observable`; never invent a direct destination.
+- Show services without configured native relay routes as `Not observable`; never invent a direct destination.
 - Stop polling and animation when the page is not mounted.
 
 ## Non-goals
 
 - Packet capture, DNS inspection, UDP accounting, kernel-wide monitoring, or Network Extension installation.
 - Per-packet timing or exact bandwidth charts.
-- Observing native direct traffic, legacy Docker VPN traffic, other processes, or traffic outside Service Manager-owned native TCP relays.
+- Observing native direct traffic, legacy Docker VPN traffic, or traffic outside Service Manager-owned native TCP relays.
+- Identifying or verifying which process used a relay.
 - Persisting traffic history across runs or app restarts.
 - Exposing traffic telemetry through MCP in this version.
 
@@ -43,7 +44,7 @@ Socket inspection cannot prove byte movement, attribution can be wrong after PID
 
 ## Truth model
 
-`TX` means payload written from the native service side toward the remote destination after the HTTP CONNECT handshake succeeds. `RX` means payload written from the remote side back toward the native service.
+`TX` means payload written from a local client of a service-configured loopback relay toward the remote destination after the HTTP CONNECT handshake succeeds. `RX` means payload written from the remote side back to that local client. Any local client can use the relay, so these counters are not verified service-process traffic.
 
 Handshake bytes are excluded. Failed CONNECT attempts never become active tunnels and never increment payload counters. Open but idle tunnels may have `activeConnections > 0` while both counters remain unchanged; they produce no pulse.
 
@@ -74,10 +75,10 @@ Add `Live Network` beside the existing sidebar utility views. The page contains:
 - compact totals for observable routes, active tunnels, and currently pulsing directions;
 - a four-column flow canvas: `This Mac`, `Services`, `Network path`, `Destinations`;
 - one selectable route row per configured native VPN route;
-- a separate `Not observable` section for services without attributable native route telemetry;
+- a separate `Not observable` section for services without configured native relay routes;
 - a selected-route detail panel with textual state, profile, local port, destination, active tunnels, RX and TX totals.
 
-The base path is always neutral. A TX increase adds one blue outward dot; an RX increase adds one violet return dot. Color is decorative: the selected detail and route row also show `Sending`, `Receiving`, `Sending and receiving`, `Idle`, `Stopped`, `Unavailable`, or `Not observable` text.
+The base path is always neutral. A TX increase adds one blue outward dot; an RX increase adds one violet return dot. Color is decorative: the selected detail and route row also show `Sending`, `Receiving`, `Sending and receiving`, `Idle`, `Stopping`, `Failed`, `Stopped`, `Unavailable`, or `Not observable` text. The page states the relay's local-client attribution boundary.
 
 The initial sample never animates. Polling is immediate then self-schedules one second after each completed request, preventing overlap. Each direction expires independently after 1.5 seconds. Late results after unmount are ignored.
 
@@ -94,6 +95,8 @@ The initial sample never animates. Polling is immediate then self-schedules one 
 
 - Poll errors keep configured routes visible, clear pulses, label telemetry `Unavailable`, and retry on the normal cadence.
 - Stopped routes remain neutral using configuration data; counters are absent rather than zeroed history.
+- While a run is active, its route definitions cannot be changed or removed through saves or external reloads. Unrelated edits remain available; route changes are accepted after stop.
+- Stopping routes retain their current-run telemetry and pulses until the relay is removed; failed runs are labeled separately from stopped runs.
 - Removing a selected route selects the next surviving route or clears the detail panel.
 - Traffic counters and registry entries disappear when a run ends, start fails, is stopped, or loses its owned VPN gateway.
 
