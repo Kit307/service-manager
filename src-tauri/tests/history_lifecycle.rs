@@ -114,3 +114,40 @@ async fn failed_command_exit_has_terminal_history() {
     assert_eq!(record.summary.state, "failed");
     assert_eq!(record.summary.exit_code, Some(23));
 }
+
+#[tokio::test]
+async fn blocked_logs_preserve_start_order_and_final_output_in_history() {
+    let (root, _state, manager, project) = fixture(serde_json::json!({
+        "id":"once", "name":"once", "cwd":".", "type":"command",
+        "command":"printf 'final-output\\n'; touch completed"
+    }))
+    .await;
+    let logs = manager.logs.lock().await;
+    let run = manager
+        .start(&project, "once", "test")
+        .await
+        .unwrap()
+        .run_id
+        .unwrap();
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while !root.path().join("completed").exists() {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    tokio::time::sleep(Duration::from_millis(2500)).await;
+    drop(logs);
+    archived(&manager, &project, &run).await;
+    let record = manager.run_details(&project, "once", &run).await.unwrap();
+    let lines: Vec<_> = record.records.iter().map(|r| r.text.as_str()).collect();
+    let started = lines
+        .iter()
+        .position(|s| s.contains("Started service"))
+        .unwrap();
+    let output = lines
+        .iter()
+        .position(|s| s.contains("final-output"))
+        .unwrap();
+    assert!(started < output);
+}

@@ -31,10 +31,20 @@ fn uses_compose_runner(definition: &ServiceDefinition) -> bool {
 struct NativeVpnSession {
     _relays: crate::vpn_relay::VpnRelaySet,
     leases: Vec<crate::vpn::VpnLease>,
+    #[cfg(test)]
+    shutdown_barrier: Option<(
+        tokio::sync::oneshot::Sender<()>,
+        tokio::sync::oneshot::Receiver<()>,
+    )>,
 }
 
 impl NativeVpnSession {
     async fn shutdown(self) {
+        #[cfg(test)]
+        if let Some((ready, release)) = self.shutdown_barrier {
+            let _ = ready.send(());
+            let _ = release.await;
+        }
         self._relays.shutdown().await;
     }
 
@@ -77,6 +87,24 @@ pub struct Manager {
     traffic: TrafficRegistry,
     #[cfg(test)]
     prepared_test_session: Arc<std::sync::Mutex<Option<Vec<crate::vpn_relay::RelayTarget>>>>,
+    #[cfg(test)]
+    preflight_test_barrier: Arc<
+        std::sync::Mutex<
+            Option<(
+                tokio::sync::oneshot::Sender<()>,
+                tokio::sync::oneshot::Receiver<()>,
+            )>,
+        >,
+    >,
+    #[cfg(test)]
+    shutdown_test_barrier: Arc<
+        std::sync::Mutex<
+            Option<(
+                tokio::sync::oneshot::Sender<()>,
+                tokio::sync::oneshot::Receiver<()>,
+            )>,
+        >,
+    >,
     pub(crate) history: Arc<Mutex<crate::history::HistoryStore>>,
     pub(crate) sequence_lock: Arc<Mutex<()>>,
     pub(crate) sequence_generation: Arc<AtomicU64>,
@@ -96,6 +124,10 @@ impl Manager {
             traffic: Arc::new(std::sync::Mutex::new(HashMap::new())),
             #[cfg(test)]
             prepared_test_session: Arc::new(std::sync::Mutex::new(None)),
+            #[cfg(test)]
+            preflight_test_barrier: Arc::new(std::sync::Mutex::new(None)),
+            #[cfg(test)]
+            shutdown_test_barrier: Arc::new(std::sync::Mutex::new(None)),
         })
     }
     fn register_network_traffic(
@@ -296,10 +328,17 @@ impl Manager {
         let targets = self.prepared_test_session.lock().unwrap().take();
         #[cfg(test)]
         if let Some(targets) = targets {
-            return Ok(NativeVpnSession {
+            let session = NativeVpnSession {
                 _relays: crate::vpn_relay::VpnRelaySet::start(targets).await?,
                 leases: vec![],
-            });
+                shutdown_barrier: self.shutdown_test_barrier.lock().unwrap().take(),
+            };
+            let barrier = self.preflight_test_barrier.lock().unwrap().take();
+            if let Some((ready, release)) = barrier {
+                let _ = ready.send(());
+                let _ = release.await;
+            }
+            return Ok(session);
         }
         let mut profiles = HashMap::new();
         let mut leases = Vec::new();
@@ -331,6 +370,8 @@ impl Manager {
         Ok(NativeVpnSession {
             _relays: relays,
             leases,
+            #[cfg(test)]
+            shutdown_barrier: None,
         })
     }
 
@@ -443,6 +484,34 @@ impl Manager {
             });
             return Ok(snapshot);
         }
+        let ServiceKind::Command { command } = &definition.kind else {
+            unreachable!()
+        };
+        let mut cmd = Command::new("/bin/zsh");
+        cmd.args(["-lc", command])
+            .current_dir(cwd)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .process_group(0);
+        if let Some(file) = &definition.env_file {
+            let env = inside(Path::new(&p.path), file)?;
+            let iter = dotenvy::from_path_iter(env).map_err(|_| {
+                AppError::new(
+                    "CONFIG_INVALID",
+                    "Could not parse the environment file. Its contents were not logged.",
+                )
+            })?;
+            for item in iter {
+                let (key, value) = item.map_err(|_| {
+                    AppError::new(
+                        "CONFIG_INVALID",
+                        "Invalid environment file syntax. Its contents were not logged.",
+                    )
+                })?;
+                cmd.env(key, value);
+            }
+        }
         let run = uuid::Uuid::new_v4().to_string();
         let mut route_session = None;
         if !definition.vpn_routes.is_empty() {
@@ -492,7 +561,23 @@ impl Manager {
             }
             route_session = match prepared {
                 Ok(session) if current.state != "stopping" => Some(session),
-                Ok(_) => {
+                Ok(session) => {
+                    drop(store);
+                    session.shutdown().await;
+                    let mut store = self.store.lock().await;
+                    let current = store
+                        .projects
+                        .get_mut(project)
+                        .and_then(|project| project.runtime.get_mut(service))
+                        .ok_or_else(|| {
+                            AppError::new("SERVICE_NOT_FOUND", "Service does not exist.")
+                        })?;
+                    if current.run_id.as_deref() != Some(&run) || current.state != "stopping" {
+                        return Err(AppError::new(
+                            "OPERATION_IN_PROGRESS",
+                            "The managed run changed during VPN setup.",
+                        ));
+                    }
                     current.state = "stopped".into();
                     current.activity = "Stopped during VPN setup".into();
                     let terminal = current.clone();
@@ -510,34 +595,6 @@ impl Manager {
                     return Err(error);
                 }
             };
-        }
-        let ServiceKind::Command { command } = &definition.kind else {
-            unreachable!()
-        };
-        let mut cmd = Command::new("/bin/zsh");
-        cmd.args(["-lc", command])
-            .current_dir(cwd)
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .process_group(0);
-        if let Some(file) = &definition.env_file {
-            let env = inside(Path::new(&p.path), file)?;
-            let iter = dotenvy::from_path_iter(env).map_err(|_| {
-                AppError::new(
-                    "CONFIG_INVALID",
-                    "Could not parse the environment file. Its contents were not logged.",
-                )
-            })?;
-            for item in iter {
-                let (key, value) = item.map_err(|_| {
-                    AppError::new(
-                        "CONFIG_INVALID",
-                        "Invalid environment file syntax. Its contents were not logged.",
-                    )
-                })?;
-                cmd.env(key, value);
-            }
         }
         if route_session.is_none() {
             store.private.dirty = true;
@@ -616,24 +673,8 @@ impl Manager {
         drop(store);
         let stdout = child.stdout.take();
         let stderr = child.stderr.take();
-        let a = stdout.map(|pipe| {
-            tokio::spawn(drain(
-                pipe,
-                self.logs.clone(),
-                key.clone(),
-                run.clone(),
-                "stdout",
-            ))
-        });
-        let b = stderr.map(|pipe| {
-            tokio::spawn(drain(
-                pipe,
-                self.logs.clone(),
-                key.clone(),
-                run.clone(),
-                "stderr",
-            ))
-        });
+        let (stdout_ready, stdout_gate) = tokio::sync::oneshot::channel::<()>();
+        let (stderr_ready, stderr_gate) = tokio::sync::oneshot::channel::<()>();
         let has_health = definition.health_check.is_some();
         let manager = self.clone();
         let project_id = project.to_string();
@@ -661,8 +702,28 @@ impl Manager {
                     ),
                 );
             }
+            let _ = stdout_ready.send(());
+            let _ = stderr_ready.send(());
         });
         tokio::spawn(async move {
+            let a = stdout.map(|pipe| {
+                let logs = manager.logs.clone();
+                let key = key.clone();
+                let run = run_id.clone();
+                tokio::spawn(async move {
+                    let _ = stdout_gate.await;
+                    drain(pipe, logs, key, run, "stdout").await;
+                })
+            });
+            let b = stderr.map(|pipe| {
+                let logs = manager.logs.clone();
+                let key = key.clone();
+                let run = run_id.clone();
+                tokio::spawn(async move {
+                    let _ = stderr_gate.await;
+                    drain(pipe, logs, key, run, "stderr").await;
+                })
+            });
             let mut traffic_guard = traffic_guard;
             let mut route_session = route_session;
             let mut wait = Box::pin(child.wait());
@@ -718,22 +779,6 @@ impl Manager {
                 }
                 if group_alive(pid) {
                     let _ = killpg(Pid::from_raw(pid as i32), Signal::SIGKILL);
-                }
-            }
-            if let Some(mut a) = a {
-                if tokio::time::timeout(Duration::from_secs(2), &mut a)
-                    .await
-                    .is_err()
-                {
-                    a.abort();
-                }
-            }
-            if let Some(mut b) = b {
-                if tokio::time::timeout(Duration::from_secs(2), &mut b)
-                    .await
-                    .is_err()
-                {
-                    b.abort();
                 }
             }
             drop(traffic_guard.take());
@@ -800,6 +845,12 @@ impl Manager {
             };
             drop(store);
             let _ = started_log.await;
+            if let Some(a) = a {
+                let _ = a.await;
+            }
+            if let Some(b) = b {
+                let _ = b.await;
+            }
             manager.logs.lock().await.push(
                 &key,
                 &run_id,
@@ -1586,6 +1637,191 @@ mod tests {
         assert_eq!(error.code, "PROCESS_START_FAILED");
         assert!(manager.network_traffic().is_empty());
         assert!(std::net::TcpListener::bind((Ipv4Addr::LOCALHOST, local_port)).is_ok());
+    }
+
+    #[tokio::test]
+    async fn invalid_routed_env_fails_before_preflight_and_runtime() {
+        let root = tempfile::tempdir().unwrap();
+        let state = tempfile::tempdir().unwrap();
+        let manager = Manager::new(state.path().into()).unwrap();
+        let config = root.path().join("fixture.ovpn");
+        std::fs::write(&config, b"client\n").unwrap();
+        let profile = manager
+            .vpns
+            .import(crate::vpn::VpnImport {
+                name: "fixture".into(),
+                config_path: config.to_string_lossy().into(),
+                username: String::new(),
+                password: String::new(),
+                key_passphrase: String::new(),
+                published_ports: vec![],
+                outbound_subnets: vec![],
+                health_target: String::new(),
+                dns_address: String::new(),
+                health_icmp_target: String::new(),
+            })
+            .await
+            .unwrap();
+        let project = manager.open(root.path().to_str().unwrap()).await.unwrap();
+        let local_port = std::net::TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port();
+        let mut definition = ServiceDefinition {
+            id: "fixture".into(),
+            name: "Fixture".into(),
+            cwd: ".".into(),
+            kind: ServiceKind::Command {
+                command: "true".into(),
+            },
+            env_file: None,
+            health_check: None,
+            ports: vec![],
+            url: None,
+            depends_on: vec![],
+            vpn: None,
+            vpn_routes: vec![VpnRoute {
+                profile_id: profile.id,
+                remote_host: "example.test".into(),
+                remote_port: 5432,
+                local_port,
+            }],
+        };
+        std::fs::write(root.path().join("invalid.env"), "BROKEN='unterminated\n").unwrap();
+        definition.env_file = Some("invalid.env".into());
+        *manager.prepared_test_session.lock().unwrap() =
+            Some(vec![crate::vpn_relay::RelayTarget {
+                route: definition.vpn_routes[0].clone(),
+                proxy: "127.0.0.1:1".parse().unwrap(),
+            }]);
+        let _saved = manager
+            .save(&project.id, definition.clone(), "absent", true)
+            .await
+            .unwrap();
+        let error = manager
+            .start(&project.id, "fixture", "test")
+            .await
+            .unwrap_err();
+        assert_eq!(error.code, "CONFIG_INVALID");
+        assert!(!manager
+            .status(&project.id, "fixture")
+            .await
+            .unwrap()
+            .active());
+        assert!(manager.network_traffic().is_empty());
+        assert!(std::net::TcpListener::bind((Ipv4Addr::LOCALHOST, local_port)).is_ok());
+        assert!(manager
+            .run_history(&project.id, "fixture")
+            .await
+            .unwrap()
+            .is_empty());
+    }
+
+    #[tokio::test]
+    async fn stopped_preflight_releases_port_before_terminal_and_restart() {
+        use crate::vpn_relay::RelayTarget;
+        let root = tempfile::tempdir().unwrap();
+        let state = tempfile::tempdir().unwrap();
+        let manager = Manager::new(state.path().into()).unwrap();
+        let config = root.path().join("fixture.ovpn");
+        std::fs::write(&config, b"client\n").unwrap();
+        let profile = manager
+            .vpns
+            .import(crate::vpn::VpnImport {
+                name: "fixture".into(),
+                config_path: config.to_string_lossy().into(),
+                username: String::new(),
+                password: String::new(),
+                key_passphrase: String::new(),
+                published_ports: vec![],
+                outbound_subnets: vec![],
+                health_target: String::new(),
+                dns_address: String::new(),
+                health_icmp_target: String::new(),
+            })
+            .await
+            .unwrap();
+        let project = manager.open(root.path().to_str().unwrap()).await.unwrap();
+        let port = std::net::TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port();
+        let route = VpnRoute {
+            profile_id: profile.id,
+            remote_host: "example.test".into(),
+            remote_port: 443,
+            local_port: port,
+        };
+        let definition = ServiceDefinition {
+            id: "fixture".into(),
+            name: "Fixture".into(),
+            cwd: ".".into(),
+            kind: ServiceKind::Command {
+                command: "exec sleep 300".into(),
+            },
+            env_file: None,
+            health_check: None,
+            ports: vec![],
+            url: None,
+            depends_on: vec![],
+            vpn: None,
+            vpn_routes: vec![route.clone()],
+        };
+        manager
+            .save(&project.id, definition, "absent", true)
+            .await
+            .unwrap();
+        let targets = || {
+            vec![RelayTarget {
+                route: route.clone(),
+                proxy: "127.0.0.1:1".parse().unwrap(),
+            }]
+        };
+        *manager.prepared_test_session.lock().unwrap() = Some(targets());
+        let (ready_tx, ready_rx) = tokio::sync::oneshot::channel();
+        let (release_tx, release_rx) = tokio::sync::oneshot::channel();
+        *manager.preflight_test_barrier.lock().unwrap() = Some((ready_tx, release_rx));
+        let (shutdown_ready_tx, shutdown_ready_rx) = tokio::sync::oneshot::channel();
+        let (shutdown_release_tx, shutdown_release_rx) = tokio::sync::oneshot::channel();
+        *manager.shutdown_test_barrier.lock().unwrap() =
+            Some((shutdown_ready_tx, shutdown_release_rx));
+        let worker = manager.clone();
+        let id = project.id.clone();
+        let starting = tokio::spawn(async move { worker.start(&id, "fixture", "test").await });
+        ready_rx.await.unwrap();
+        manager.stop(&project.id, "fixture").await.unwrap();
+        assert_eq!(
+            manager.status(&project.id, "fixture").await.unwrap().state,
+            "stopping"
+        );
+        release_tx.send(()).unwrap();
+        shutdown_ready_rx.await.unwrap();
+        assert_eq!(
+            manager.status(&project.id, "fixture").await.unwrap().state,
+            "stopping"
+        );
+        assert!(std::net::TcpListener::bind((Ipv4Addr::LOCALHOST, port)).is_err());
+        shutdown_release_tx.send(()).unwrap();
+        assert_eq!(starting.await.unwrap().unwrap().state, "stopped");
+        let rebound = std::net::TcpListener::bind((Ipv4Addr::LOCALHOST, port)).unwrap();
+        drop(rebound);
+        *manager.prepared_test_session.lock().unwrap() = Some(targets());
+        manager.start(&project.id, "fixture", "test").await.unwrap();
+        manager.stop(&project.id, "fixture").await.unwrap();
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while manager
+                .status(&project.id, "fixture")
+                .await
+                .unwrap()
+                .active()
+            {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
     }
 
     #[tokio::test]
