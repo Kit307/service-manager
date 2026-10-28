@@ -43,23 +43,56 @@ describe("useNetworkTraffic", () => {
   });
 
   it("expires and restarts each direction independently", async () => {
-    request.mockResolvedValueOnce([row(10, 20)]).mockResolvedValueOnce([row(11, 20)])
-      .mockResolvedValueOnce([row(11, 21)]).mockResolvedValueOnce([row(12, 21)])
-      .mockResolvedValue([row(12, 21)]);
+    request.mockResolvedValueOnce([row(10, 20)]).mockResolvedValueOnce([row(11, 21)])
+      .mockResolvedValueOnce([row(12, 21)]).mockResolvedValue([row(12, 21)]);
     const { result } = renderHook(() => useNetworkTraffic());
     await act(async () => {});
     await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
-    expect(result.current.activity[key]).toEqual({ tx: true, rx: false });
-    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
     expect(result.current.activity[key]).toEqual({ tx: true, rx: true });
-    await act(async () => { await vi.advanceTimersByTimeAsync(500); });
-    expect(result.current.activity[key]).toEqual({ tx: false, rx: true });
-    await act(async () => { await vi.advanceTimersByTimeAsync(500); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
     expect(result.current.activity[key]).toEqual({ tx: true, rx: true });
     await act(async () => { await vi.advanceTimersByTimeAsync(500); });
     expect(result.current.activity[key]).toEqual({ tx: true, rx: false });
     await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
     expect(result.current.activity[key]).toEqual({ tx: false, rx: false });
+  });
+
+  it.each(["missing", "error"])("clears active timers on %s and recovers with a fresh baseline", async (failure) => {
+    request.mockResolvedValueOnce([row(10, 10)]).mockResolvedValueOnce([row(11, 11)]);
+    if (failure === "missing") request.mockResolvedValueOnce([]);
+    else request.mockRejectedValueOnce(new Error("offline"));
+    request.mockResolvedValueOnce([row(100, 100)]).mockResolvedValue([row(101, 101)]);
+    const { result } = renderHook(() => useNetworkTraffic());
+    await act(async () => {});
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+    expect(result.current.activity[key]).toEqual({ tx: true, rx: true });
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+    expect(result.current.activity).toEqual({});
+    await act(async () => { await vi.advanceTimersByTimeAsync(600); });
+    expect(result.current.activity).toEqual({});
+    await act(async () => { await vi.advanceTimersByTimeAsync(400); });
+    expect(result.current.samples).toEqual([row(100, 100)]);
+    expect(result.current.activity).toEqual({});
+    expect(result.current.error).toBeNull();
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+    expect(result.current.activity[key]).toEqual({ tx: true, rx: true });
+  });
+
+  it("cancels active timers and ignores a pending rejection after unmount", async () => {
+    const pending = deferred<ReturnType<typeof row>[]>();
+    request.mockResolvedValueOnce([row(10, 10)]).mockResolvedValueOnce([row(11, 11)])
+      .mockReturnValueOnce(pending.promise);
+    const { result, unmount } = renderHook(() => useNetworkTraffic());
+    await act(async () => {});
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+    expect(result.current.activity[key]).toEqual({ tx: true, rx: true });
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+    unmount();
+    expect(vi.getTimerCount()).toBe(0);
+    await act(async () => { pending.reject(new Error("offline")); await pending.promise.catch(() => {}); await vi.advanceTimersByTimeAsync(5000); });
+    expect(result.current.activity[key]).toEqual({ tx: true, rx: true });
+    expect(result.current.error).toBeNull();
+    expect(request).toHaveBeenCalledTimes(3);
   });
 
   it("clears baselines and activity on reset, run change, missing record and error, then recovers", async () => {
