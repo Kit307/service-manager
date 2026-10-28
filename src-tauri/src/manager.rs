@@ -675,6 +675,7 @@ impl Manager {
         let stderr = child.stderr.take();
         let (stdout_ready, stdout_gate) = tokio::sync::oneshot::channel::<()>();
         let (stderr_ready, stderr_gate) = tokio::sync::oneshot::channel::<()>();
+        let (drain_deadline, drain_deadline_rx) = tokio::sync::watch::channel(None);
         let has_health = definition.health_check.is_some();
         let manager = self.clone();
         let project_id = project.to_string();
@@ -706,13 +707,15 @@ impl Manager {
             let _ = stderr_ready.send(());
         });
         tokio::spawn(async move {
+            let stdout_deadline = drain_deadline_rx.clone();
+            let stderr_deadline = drain_deadline_rx;
             let a = stdout.map(|pipe| {
                 let logs = manager.logs.clone();
                 let key = key.clone();
                 let run = run_id.clone();
                 tokio::spawn(async move {
                     let _ = stdout_gate.await;
-                    drain(pipe, logs, key, run, "stdout").await;
+                    drain(pipe, logs, key, run, "stdout", Some(stdout_deadline)).await
                 })
             });
             let b = stderr.map(|pipe| {
@@ -721,7 +724,7 @@ impl Manager {
                 let run = run_id.clone();
                 tokio::spawn(async move {
                     let _ = stderr_gate.await;
-                    drain(pipe, logs, key, run, "stderr").await;
+                    drain(pipe, logs, key, run, "stderr", Some(stderr_deadline)).await
                 })
             });
             let mut traffic_guard = traffic_guard;
@@ -781,6 +784,7 @@ impl Manager {
                     let _ = killpg(Pid::from_raw(pid as i32), Signal::SIGKILL);
                 }
             }
+            let _ = drain_deadline.send(Some(tokio::time::Instant::now() + Duration::from_secs(2)));
             drop(traffic_guard.take());
             if let Some(session) = route_session.take() {
                 session.shutdown().await;
@@ -845,11 +849,18 @@ impl Manager {
             };
             drop(store);
             let _ = started_log.await;
-            if let Some(a) = a {
-                let _ = a.await;
-            }
-            if let Some(b) = b {
-                let _ = b.await;
+            let incomplete_stdout = if let Some(a) = a {
+                a.await.unwrap_or(true)
+            } else {
+                false
+            };
+            let incomplete_stderr = if let Some(b) = b {
+                b.await.unwrap_or(true)
+            } else {
+                false
+            };
+            if incomplete_stdout || incomplete_stderr {
+                manager.logs.lock().await.push(&key, &run_id, "system", "Service output may be incomplete because a pipe remained open after process exit.");
             }
             manager.logs.lock().await.push(
                 &key,
@@ -1031,6 +1042,7 @@ impl Manager {
                 key.clone(),
                 job.run.clone(),
                 "stdout",
+                None,
             )));
         }
         if let Some(pipe) = child.stderr.take() {
@@ -1040,6 +1052,7 @@ impl Manager {
                 key.clone(),
                 job.run.clone(),
                 "stderr",
+                None,
             )));
         }
         self.logs.lock().await.push(
@@ -1469,11 +1482,36 @@ async fn drain(
     key: String,
     run: String,
     stream: &'static str,
-) {
+    mut deadline: Option<tokio::sync::watch::Receiver<Option<tokio::time::Instant>>>,
+) -> bool {
     let mut chunk = [0u8; 4096];
     let mut line = Vec::with_capacity(16384);
+    let mut after_deadline = 0usize;
+    let mut incomplete = false;
     loop {
-        match pipe.read(&mut chunk).await {
+        let read = tokio::select! {
+            biased;
+            result = pipe.read(&mut chunk) => result,
+            _ = async {
+                if let Some(deadline) = &mut deadline {
+                    loop {
+                        let value = *deadline.borrow_and_update();
+                        if let Some(value) = value {
+                            tokio::time::sleep_until(value).await;
+                            break;
+                        }
+                        if deadline.changed().await.is_err() { break; }
+                    }
+                } else {
+                    std::future::pending::<()>().await;
+                }
+            } => {
+                incomplete = true;
+                break;
+            }
+        };
+        let read_at = tokio::time::Instant::now();
+        match read {
             Ok(0) | Err(_) => break,
             Ok(n) => {
                 for byte in &chunk[..n] {
@@ -1497,6 +1535,18 @@ async fn drain(
                         line.push(*byte);
                     }
                 }
+                if deadline
+                    .as_ref()
+                    .and_then(|d| *d.borrow())
+                    .is_some_and(|d| read_at >= d)
+                {
+                    after_deadline += n;
+                    // shortcut: cap post-deadline output at 1 MiB, increase if pipe capacities exceed this.
+                    if after_deadline >= 1024 * 1024 {
+                        incomplete = true;
+                        break;
+                    }
+                }
             }
         }
     }
@@ -1505,6 +1555,7 @@ async fn drain(
             .await
             .push(&key, &run, stream, &String::from_utf8_lossy(&line));
     }
+    incomplete
 }
 
 #[cfg(test)]
@@ -1967,6 +2018,7 @@ mod tests {
             "flood".into(),
             "run".into(),
             "stdout",
+            None,
         ));
         let chunk = "ก".repeat(1024);
         for _ in 0..7000 {

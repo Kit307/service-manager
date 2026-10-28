@@ -151,3 +151,56 @@ async fn blocked_logs_preserve_start_order_and_final_output_in_history() {
         .unwrap();
     assert!(started < output);
 }
+
+#[tokio::test]
+async fn escaped_process_holding_stdout_does_not_strand_history() {
+    struct Escaped(std::path::PathBuf);
+    impl Drop for Escaped {
+        fn drop(&mut self) {
+            if let Ok(pid) = std::fs::read_to_string(&self.0) {
+                if let Ok(pid) = pid.parse::<i32>() {
+                    let _ = nix::sys::signal::kill(
+                        nix::unistd::Pid::from_raw(pid),
+                        nix::sys::signal::Signal::SIGKILL,
+                    );
+                }
+            }
+        }
+    }
+    let (root, _state, manager, project) = fixture(serde_json::json!({
+        "id":"once", "name":"once", "cwd":".", "type":"command",
+        "command":"/usr/bin/python3 -c 'import os,time; r,w=os.pipe(); p=os.fork(); p and (os.close(w),os.read(r,1),os._exit(0)); os.close(r); os.setsid(); open(\"escaped.pid\",\"w\").write(str(os.getpid())); print(\"before-cutoff\",end=\"\",flush=True); os.write(w,b\"x\"); os.close(w); time.sleep(60)'"
+    })).await;
+    let _escaped = Escaped(root.path().join("escaped.pid"));
+    let logs = manager.logs.lock().await;
+    let run = manager
+        .start(&project, "once", "test")
+        .await
+        .unwrap()
+        .run_id
+        .unwrap();
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while !root.path().join("escaped.pid").exists() {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    tokio::time::sleep(Duration::from_millis(2500)).await;
+    drop(logs);
+    archived(&manager, &project, &run).await;
+    let record = manager.run_details(&project, "once", &run).await.unwrap();
+    let lines: Vec<_> = record.records.iter().map(|r| r.text.as_str()).collect();
+    let output = lines
+        .iter()
+        .position(|s| s.contains("before-cutoff"))
+        .unwrap();
+    let exited = lines
+        .iter()
+        .position(|s| s.contains("Process exited"))
+        .unwrap();
+    assert!(output < exited);
+    assert!(lines
+        .iter()
+        .any(|s| s.contains("output") && s.contains("incomplete")));
+}
