@@ -72,12 +72,30 @@ with tempfile.TemporaryDirectory(prefix='.sm-vpn-fixture-',dir=ROOT) as tmp:
    print(json.dumps({'failedVpnHealthUnhealthy':not state['Running'] or state.get('Health',{}).get('Status')=='unhealthy','failedVpnWorkerBlocked':not probe(workers[1]),'otherVpnWorkerUnaffected':probe(workers[2])}),flush=True)
 
  finally:
-  owner_path=p/'state/vpn/owner'
-  if owner_path.exists():
-   owner=owner_path.read_text().strip()
+  owners=[path.read_text().strip() for path in [p/'state/vpn/owner',p/'state-native/vpn/owner'] if path.exists()]
+  expected_containers=[*workers,*gateways,server]
+  expected_networks=[net]
+  for state in [p/'state',p/'state-native']:
+   owner_path=state/'vpn/owner';profiles_path=state/'vpn/profiles.json'
+   if owner_path.exists() and profiles_path.exists():
+    owner=owner_path.read_text().strip()
+    for profile in json.loads(profiles_path.read_text()):
+     name=f"sm-vpn-{owner[:8]}-{profile['id']}"
+     expected_containers.append(name);expected_networks.append(name+'-net')
+  for owner in owners:
    for resource in docker('ps','-aq','--filter','label=io.service-manager.vpn.owner='+owner,check=False).stdout.splitlines():docker('rm','-f',resource,check=False)
    for network_id in docker('network','ls','-q','--filter','label=io.service-manager.vpn.owner='+owner,check=False).stdout.splitlines():
     docker('network','disconnect','-f',network_id,server,check=False);docker('network','rm',network_id,check=False)
   for name in [*workers,*gateways,server]:docker('rm','-f',name,check=False)
   docker('network','rm',net,check=False)
+  remaining_containers=docker('ps','-a','--format','{{.Names}}').stdout.splitlines()
+  remaining_networks=docker('network','ls','--format','{{.Name}}').stdout.splitlines()
+  leftovers=[name for name in expected_containers if name in remaining_containers]+[name for name in expected_networks if name in remaining_networks]
+  for owner in owners:
+   leftovers+=docker('ps','-aq','--filter','label=io.service-manager.vpn.owner='+owner).stdout.splitlines()
+   leftovers+=docker('network','ls','-q','--filter','label=io.service-manager.vpn.owner='+owner).stdout.splitlines()
+  leftovers+=docker('ps','-aq','--filter','label=dev.service-manager.proof='+run).stdout.splitlines()
+  leftovers+=docker('network','ls','-q','--filter','label=dev.service-manager.proof='+run).stdout.splitlines()
+  if leftovers: raise RuntimeError('Synthetic fixture cleanup incomplete: '+', '.join(leftovers))
+  print(json.dumps({'verifiedAbsentContainers':expected_containers,'verifiedAbsentNetworks':expected_networks}),flush=True)
  print('fixtureCleanupComplete',flush=True)
