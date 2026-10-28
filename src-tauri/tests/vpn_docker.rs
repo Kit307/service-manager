@@ -581,6 +581,61 @@ async fn native_vpn_routes_keep_commands_on_host_and_share_gateways() {
                 .contains("vpn-worker-marker")
         }));
     }
+    // A successful routed preflight followed by an OS spawn failure must release
+    // the relay and publish no traffic for that failed run.
+    let failure_port = free_port();
+    std::fs::write(
+        root.join("oversized.env"),
+        format!("LARGE={}\n", "x".repeat(4 * 1024 * 1024)),
+    )
+    .unwrap();
+    let revision = manager
+        .projects()
+        .await
+        .into_iter()
+        .find(|p| p.id == project.id)
+        .unwrap()
+        .revision;
+    manager
+        .save(
+            &project.id,
+            ServiceDefinition {
+                id: "routed-spawn-failure".into(),
+                name: "Routed spawn failure".into(),
+                cwd: ".".into(),
+                kind: ServiceKind::Command {
+                    command: "true".into(),
+                },
+                env_file: Some("oversized.env".into()),
+                health_check: None,
+                ports: vec![],
+                url: None,
+                depends_on: vec![],
+                vpn: None,
+                vpn_routes: vec![VpnRoute {
+                    profile_id: profiles[0].id.clone(),
+                    remote_host: "10.66.0.1".into(),
+                    remote_port: 5432,
+                    local_port: failure_port,
+                }],
+            },
+            &revision,
+            true,
+        )
+        .await
+        .unwrap();
+    let error = manager
+        .start(&project.id, "routed-spawn-failure", "test")
+        .await
+        .unwrap_err();
+    assert_eq!(error.code, "PROCESS_START_FAILED");
+    assert!(!manager
+        .network_traffic()
+        .iter()
+        .any(|row| row.service_id == "routed-spawn-failure"));
+    let rebound = TcpListener::bind((Ipv4Addr::LOCALHOST, failure_port)).unwrap();
+    drop(rebound);
+
     for port in ports {
         assert!(
             relay_reachable(port).await,
@@ -618,22 +673,29 @@ async fn native_vpn_routes_keep_commands_on_host_and_share_gateways() {
     .await
     .unwrap();
     wait_terminal(&manager, &project.id, "native-a1", "stopped").await;
-    for _ in 0..20 {
-        if TcpStream::connect((Ipv4Addr::LOCALHOST, ports[0]))
-            .await
-            .is_err()
-        {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    }
-    assert!(TcpStream::connect((Ipv4Addr::LOCALHOST, ports[0]))
+    assert!(!manager
+        .network_traffic()
+        .iter()
+        .any(|row| row.service_id == "native-a1"));
+    let rebound = TcpListener::bind((Ipv4Addr::LOCALHOST, ports[0])).unwrap();
+    drop(rebound);
+    manager
+        .start(&project.id, "native-a1", "test")
         .await
-        .is_err());
+        .unwrap();
+    wait_marker(&manager, &project.id, "native-a1").await;
+    manager.stop(&project.id, "native-a1").await.unwrap();
+    wait_terminal(&manager, &project.id, "native-a1", "stopped").await;
     assert!(relay_reachable(ports[1]).await);
     assert!(relay_reachable(ports[2]).await);
     docker(&["stop", "--time", "1", &cleanup.gateways[0]]);
     wait_terminal(&manager, &project.id, "native-a2", "failed").await;
+    assert!(!manager
+        .network_traffic()
+        .iter()
+        .any(|row| row.service_id == "native-a2"));
+    let rebound = TcpListener::bind((Ipv4Addr::LOCALHOST, ports[1])).unwrap();
+    drop(rebound);
     assert!(manager
         .status(&project.id, "native-b1")
         .await

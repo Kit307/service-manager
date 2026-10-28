@@ -21,7 +21,7 @@ pub struct RelayTarget {
 }
 
 pub struct VpnRelaySet {
-    tasks: Vec<JoinHandle<()>>,
+    tasks: Vec<(Option<tokio::sync::oneshot::Sender<()>>, JoinHandle<()>)>,
     traffic: Vec<RelayTraffic>,
 }
 
@@ -139,10 +139,12 @@ impl VpnRelaySet {
             .into_iter()
             .zip(traffic.iter().cloned())
             .map(|((listener, target), traffic)| {
-                tokio::spawn(async move {
+                let (stop, mut stopped) = tokio::sync::oneshot::channel();
+                let task = tokio::spawn(async move {
                     let mut connections = JoinSet::new();
                     loop {
                         tokio::select! {
+                            _ = &mut stopped => break,
                             accepted = listener.accept() => {
                                 let Ok((client, _)) = accepted else { break };
                                 let proxy = target.proxy;
@@ -156,10 +158,25 @@ impl VpnRelaySet {
                             Some(_) = connections.join_next(), if !connections.is_empty() => {}
                         }
                     }
-                })
+                    drop(listener);
+                    connections.shutdown().await;
+                });
+                (Some(stop), task)
             })
             .collect();
         Ok(Self { tasks, traffic })
+    }
+
+    pub async fn shutdown(mut self) {
+        for (stop, _) in &mut self.tasks {
+            if let Some(stop) = stop.take() {
+                let _ = stop.send(());
+            }
+        }
+        while let Some((_, task)) = self.tasks.last_mut() {
+            let _ = task.await;
+            self.tasks.pop();
+        }
     }
 
     pub fn traffic(&self) -> Vec<RelayTraffic> {
@@ -169,7 +186,7 @@ impl VpnRelaySet {
 
 impl Drop for VpnRelaySet {
     fn drop(&mut self) {
-        for task in &self.tasks {
+        for (_, task) in &self.tasks {
             task.abort();
         }
     }

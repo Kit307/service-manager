@@ -34,6 +34,10 @@ struct NativeVpnSession {
 }
 
 impl NativeVpnSession {
+    async fn shutdown(self) {
+        self._relays.shutdown().await;
+    }
+
     async fn safe(&self) -> bool {
         for lease in &self.leases {
             if !lease.worker_safe().await.unwrap_or(false) {
@@ -71,6 +75,8 @@ pub struct Manager {
     pub vpns: crate::vpn::VpnManager,
     shutting_down: Arc<AtomicBool>,
     traffic: TrafficRegistry,
+    #[cfg(test)]
+    prepared_test_session: Arc<std::sync::Mutex<Option<Vec<crate::vpn_relay::RelayTarget>>>>,
     pub(crate) history: Arc<Mutex<crate::history::HistoryStore>>,
     pub(crate) sequence_lock: Arc<Mutex<()>>,
     pub(crate) sequence_generation: Arc<AtomicU64>,
@@ -88,6 +94,8 @@ impl Manager {
             logs: Arc::new(Mutex::new(LogStore::default())),
             shutting_down: Arc::new(AtomicBool::new(false)),
             traffic: Arc::new(std::sync::Mutex::new(HashMap::new())),
+            #[cfg(test)]
+            prepared_test_session: Arc::new(std::sync::Mutex::new(None)),
         })
     }
     fn register_network_traffic(
@@ -284,6 +292,15 @@ impl Manager {
         user: &crate::project::ServiceRef,
         run: &str,
     ) -> Result<NativeVpnSession> {
+        #[cfg(test)]
+        let targets = self.prepared_test_session.lock().unwrap().take();
+        #[cfg(test)]
+        if let Some(targets) = targets {
+            return Ok(NativeVpnSession {
+                _relays: crate::vpn_relay::VpnRelaySet::start(targets).await?,
+                leases: vec![],
+            });
+        }
         let mut profiles = HashMap::new();
         let mut leases = Vec::new();
         for route in routes {
@@ -431,13 +448,15 @@ impl Manager {
         if !definition.vpn_routes.is_empty() {
             store.private.dirty = true;
             store.persist()?;
-            self.history
-                .lock()
-                .await
-                .begin(project, service, &run, match &definition.kind {
+            self.history.lock().await.begin(
+                project,
+                service,
+                &run,
+                match &definition.kind {
                     ServiceKind::Command { command } => command,
                     ServiceKind::Compose { .. } => unreachable!(),
-                })?;
+                },
+            )?;
             let starting = Snapshot {
                 state: "starting".into(),
                 started_at: Some(chrono::Utc::now().to_rfc3339()),
@@ -535,6 +554,9 @@ impl Manager {
                     "PROCESS_START_FAILED",
                     "Could not start the command. Check its working folder and shell.",
                 );
+                if let Some(session) = route_session.take() {
+                    session.shutdown().await;
+                }
                 let snapshot = Snapshot {
                     state: "failed".into(),
                     run_id: Some(run),
@@ -592,23 +614,6 @@ impl Manager {
             .runtime
             .insert(service.into(), snapshot.clone());
         drop(store);
-        self.logs.lock().await.push(
-            &key,
-            &run,
-            "system",
-            "Started service. Output is shared with the desktop and authorized AI clients.",
-        );
-        if !definition.vpn_routes.is_empty() {
-            self.logs.lock().await.push(
-                &key,
-                &run,
-                "system",
-                &format!(
-                    "Opened {} loopback VPN destination relay(s). The service process remains native.",
-                    definition.vpn_routes.len()
-                ),
-            );
-        }
         let stdout = child.stdout.take();
         let stderr = child.stderr.take();
         let a = stdout.map(|pipe| {
@@ -634,6 +639,29 @@ impl Manager {
         let project_id = project.to_string();
         let service_id = service.to_string();
         let run_id = run.clone();
+        let relay_count = definition.vpn_routes.len();
+        let log_store = self.logs.clone();
+        let log_key = key.clone();
+        let log_run = run.clone();
+        let started_log = tokio::spawn(async move {
+            log_store.lock().await.push(
+                &log_key,
+                &log_run,
+                "system",
+                "Started service. Output is shared with the desktop and authorized AI clients.",
+            );
+            if relay_count != 0 {
+                log_store.lock().await.push(
+                    &log_key,
+                    &log_run,
+                    "system",
+                    &format!(
+                        "Opened {} loopback VPN destination relay(s). The service process remains native.",
+                        relay_count
+                    ),
+                );
+            }
+        });
         tokio::spawn(async move {
             let mut traffic_guard = traffic_guard;
             let mut route_session = route_session;
@@ -645,8 +673,10 @@ impl Manager {
                         result = &mut wait => break result,
                         _ = tokio::time::sleep(Duration::from_secs(1)) => {
                             if vpn_failure.is_none() && !route_session.as_ref().unwrap().safe().await {
-                                drop(route_session.take());
                                 drop(traffic_guard.take());
+                                if let Some(session) = route_session.take() {
+                                    session.shutdown().await;
+                                }
                                 let message = "VPN gateway stopped or ownership was lost. The native service and its loopback relays were stopped.".to_string();
                                 vpn_failure = Some(message.clone());
                                 if let Some(current) = manager
@@ -705,6 +735,10 @@ impl Manager {
                 {
                     b.abort();
                 }
+            }
+            drop(traffic_guard.take());
+            if let Some(session) = route_session.take() {
+                session.shutdown().await;
             }
             let code = result.as_ref().ok().and_then(|s| s.code());
             let mut store = manager.store.lock().await;
@@ -765,6 +799,7 @@ impl Manager {
                 return;
             };
             drop(store);
+            let _ = started_log.await;
             manager.logs.lock().await.push(
                 &key,
                 &run_id,
@@ -1519,7 +1554,11 @@ mod tests {
             .unwrap();
         assert!(manager.start(&project.id, "fixture", "test").await.is_err());
         assert_eq!(
-            manager.status(&project.id, "fixture").await.unwrap().activity,
+            manager
+                .status(&project.id, "fixture")
+                .await
+                .unwrap()
+                .activity,
             "VPN relay setup failed"
         );
         assert!(manager.network_traffic().is_empty());
@@ -1529,7 +1568,12 @@ mod tests {
             format!("LARGE={}\n", "x".repeat(4 * 1024 * 1024)),
         )
         .unwrap();
-        definition.vpn_routes.clear();
+        let route = definition.vpn_routes[0].clone();
+        *manager.prepared_test_session.lock().unwrap() =
+            Some(vec![crate::vpn_relay::RelayTarget {
+                route,
+                proxy: "127.0.0.1:1".parse().unwrap(),
+            }]);
         definition.env_file = Some("fixture.env".into());
         manager
             .save(&project.id, definition, &saved.revision, true)
@@ -1541,6 +1585,122 @@ mod tests {
             .unwrap_err();
         assert_eq!(error.code, "PROCESS_START_FAILED");
         assert!(manager.network_traffic().is_empty());
+        assert!(std::net::TcpListener::bind((Ipv4Addr::LOCALHOST, local_port)).is_ok());
+    }
+
+    #[tokio::test]
+    async fn terminal_state_waits_for_route_release_even_when_logs_block() {
+        use crate::vpn_relay::RelayTarget;
+        let root = tempfile::tempdir().unwrap();
+        let state = tempfile::tempdir().unwrap();
+        let manager = Manager::new(state.path().into()).unwrap();
+        let config = root.path().join("fixture.ovpn");
+        std::fs::write(&config, b"client\n").unwrap();
+        let profile = manager
+            .vpns
+            .import(crate::vpn::VpnImport {
+                name: "fixture".into(),
+                config_path: config.to_string_lossy().into(),
+                username: String::new(),
+                password: String::new(),
+                key_passphrase: String::new(),
+                published_ports: vec![],
+                outbound_subnets: vec![],
+                health_target: String::new(),
+                dns_address: String::new(),
+                health_icmp_target: String::new(),
+            })
+            .await
+            .unwrap();
+        let project = manager.open(root.path().to_str().unwrap()).await.unwrap();
+        let port = std::net::TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port();
+        let route = VpnRoute {
+            profile_id: profile.id,
+            remote_host: "example.test".into(),
+            remote_port: 443,
+            local_port: port,
+        };
+        let definition = ServiceDefinition {
+            id: "fixture".into(),
+            name: "Fixture".into(),
+            cwd: ".".into(),
+            kind: ServiceKind::Command {
+                command: "exec sleep 300".into(),
+            },
+            env_file: None,
+            health_check: None,
+            ports: vec![],
+            url: None,
+            depends_on: vec![],
+            vpn: None,
+            vpn_routes: vec![route.clone()],
+        };
+        manager
+            .save(&project.id, definition, "absent", true)
+            .await
+            .unwrap();
+        let make_targets = || {
+            vec![RelayTarget {
+                route: route.clone(),
+                proxy: "127.0.0.1:1".parse().unwrap(),
+            }]
+        };
+        *manager.prepared_test_session.lock().unwrap() = Some(make_targets());
+        let started = manager.start(&project.id, "fixture", "test").await.unwrap();
+        tokio::time::timeout(Duration::from_secs(3), async {
+            loop {
+                if !manager
+                    .read_logs(&project.id, "fixture", None)
+                    .await
+                    .unwrap()
+                    .records
+                    .is_empty()
+                {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        let logs = manager.logs.lock().await;
+        manager.stop(&project.id, "fixture").await.unwrap();
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while manager
+                .status(&project.id, "fixture")
+                .await
+                .unwrap()
+                .active()
+            {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        assert!(manager.network_traffic().is_empty());
+        let rebound = std::net::TcpListener::bind((Ipv4Addr::LOCALHOST, port)).unwrap();
+        drop(rebound);
+        *manager.prepared_test_session.lock().unwrap() = Some(make_targets());
+        let restarted = manager.start(&project.id, "fixture", "test").await.unwrap();
+        assert_ne!(started.run_id, restarted.run_id);
+        drop(logs);
+        manager.stop(&project.id, "fixture").await.unwrap();
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while manager
+                .status(&project.id, "fixture")
+                .await
+                .unwrap()
+                .active()
+            {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
     }
 
     #[test]
@@ -1557,7 +1717,8 @@ mod tests {
                 "remotePort":5432,
                 "localPort":15432
             }]
-        })).unwrap();
+        }))
+        .unwrap();
         assert!(!uses_compose_runner(&definition));
     }
     #[tokio::test]

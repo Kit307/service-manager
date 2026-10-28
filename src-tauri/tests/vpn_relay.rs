@@ -283,3 +283,42 @@ async fn active_connections_decrement_independently_and_on_relay_drop() {
     drop(relay);
     wait_for(&traffic, 0).await;
 }
+
+#[tokio::test]
+async fn shutdown_waits_for_connections_and_releases_port_for_immediate_rebind() {
+    let target = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
+    let local_port = free_port().await;
+    let relay = VpnRelaySet::start(vec![RelayTarget {
+        route: route(local_port, target.local_addr().unwrap().port()),
+        proxy: proxy("200 Connection Established").await,
+    }])
+    .await
+    .unwrap();
+    let traffic = relay.traffic().remove(0);
+    let mut client = TcpStream::connect((Ipv4Addr::LOCALHOST, local_port))
+        .await
+        .unwrap();
+    let (_remote, _) = target.accept().await.unwrap();
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while traffic.snapshot().active_connections != 1 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    relay.shutdown().await;
+    assert_eq!(traffic.snapshot().active_connections, 0);
+    let mut byte = [0];
+    assert!(matches!(client.read(&mut byte).await, Ok(0) | Err(_)));
+    let rebound = TcpListener::bind((Ipv4Addr::LOCALHOST, local_port))
+        .await
+        .unwrap();
+    drop(rebound);
+    let restarted = VpnRelaySet::start(vec![RelayTarget {
+        route: route(local_port, target.local_addr().unwrap().port()),
+        proxy: proxy("200 Connection Established").await,
+    }])
+    .await
+    .unwrap();
+    restarted.shutdown().await;
+}
