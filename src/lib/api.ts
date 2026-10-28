@@ -10,7 +10,7 @@ import type {
   Workspace,
   WorkspaceGroup,
   ServiceRef,
-  PortListener, RunSummary, RunRecord, Diagnostics,
+  PortListener, RunSummary, RunRecord, Diagnostics, NetworkTraffic,
 } from "./types";
 
 export const isDesktop = () => "__TAURI_INTERNALS__" in window;
@@ -42,6 +42,7 @@ export async function pickVpnConfig() {
   return open({ multiple: false, directory: false, filters: [{ name: "OpenVPN", extensions: ["ovpn"] }] });
 }
 export const api = {
+  networkTraffic: (): Promise<NetworkTraffic[]> => invoke("network_traffic"),
   listVpnProfiles: (): Promise<VpnProfile[]> => invoke("list_vpn_profiles", {}),
   importVpnProfile: (input: VpnImport): Promise<VpnProfile> => invoke("import_vpn_profile", { input }),
   updateVpnNetwork: (id: string, publishedPorts: VpnPortMapping[], outboundSubnets: string[]): Promise<VpnProfile> => invoke("update_vpn_network", { id, publishedPorts, outboundSubnets }),

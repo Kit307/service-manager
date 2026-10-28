@@ -67,6 +67,11 @@ export type Workspace = {
   uncleanShutdown: boolean;
 };
 export type ServiceRef = { projectId: string; serviceId: string };
+export type NetworkTraffic = {
+  projectId: string; serviceId: string; runId: string; profileId: string;
+  localPort: number; remoteHost: string; remotePort: number;
+  txBytes: number; rxBytes: number; activeConnections: number;
+};
 export type WorkspaceGroup = {
   id: string;
   name: string;
