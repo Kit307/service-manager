@@ -3,5 +3,5 @@
   "identifier": "default",
   "description": "Local desktop window with a native folder picker.",
   "windows": ["main"],
-  "permissions": ["core:default", "core:window:allow-start-dragging", "dialog:allow-open", "dialog:allow-ask"]
+  "permissions": ["core:default", "core:app:allow-version", "core:window:allow-start-dragging", "dialog:allow-open", "dialog:allow-ask"]
 }

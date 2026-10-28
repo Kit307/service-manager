@@ -57,6 +57,7 @@ export function ServiceEditor({
   return (
     <form
       className="service-form"
+      title="Save service: ⌘S / Ctrl+S"
       onSubmit={(event) => {
         event.preventDefault();
         const parts = ports.trim() ? ports.split(",").map((part) => part.trim()) : [];

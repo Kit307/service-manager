@@ -2,6 +2,7 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 import App from "../App";
+import packageInfo from "../../package.json";
 
 describe("first launch", () => {
   it("offers Add service and explains that adding does not run commands", () => {
@@ -19,7 +20,7 @@ it("opens central VPN settings with legacy workspace data and preserves the vers
   render(<App />);
   await userEvent.click(screen.getByRole("button", { name: "Docker VPN" }));
   expect(screen.getByRole("heading", { name: "Shared Docker VPN" })).toBeVisible();
-  expect(screen.getByText("0.6")).toBeVisible();
+  expect(screen.getByText(packageInfo.version)).toBeVisible();
   expect(screen.getByRole("button", { name: "Import profile" })).toBeVisible();
 });
 

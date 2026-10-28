@@ -150,6 +150,34 @@ it("opens the configured service URL through the native API", async () => {
   await waitFor(() => expect(api.openUrl).toHaveBeenCalledExactlyOnceWith("fixture", "one"));
 });
 
+it("runs, restarts, stops and opens logs for the selected service with shortcuts", async () => {
+  vi.mocked(api.control).mockResolvedValue(undefined);
+  render(<App />);
+  await userEvent.click(await screen.findByRole("button", { name: /Two Stopped/ }));
+  fireEvent.keyDown(window, { key: "r", metaKey: true });
+  await waitFor(() => expect(api.control).toHaveBeenCalledWith("fixture", "two", "start"));
+  await userEvent.click(screen.getByRole("button", { name: /One Running/ }));
+  fireEvent.keyDown(window, { key: "r", metaKey: true });
+  await waitFor(() => expect(api.control).toHaveBeenCalledWith("fixture", "one", "restart"));
+  fireEvent.keyDown(window, { key: ".", metaKey: true });
+  await waitFor(() => expect(api.control).toHaveBeenCalledWith("fixture", "one", "stop"));
+  fireEvent.keyDown(window, { key: "l", metaKey: true });
+  expect(await screen.findByRole("tab", { name: "One Running" })).toBeVisible();
+});
+
+it("saves the settings form with Command-S without running while editing", async () => {
+  vi.spyOn(api, "saveService").mockResolvedValue(workspace.projects[0]);
+  render(<App />);
+  await userEvent.click(await screen.findByRole("button", { name: /One Running/ }));
+  await userEvent.click(screen.getByRole("tab", { name: "Settings" }));
+  const input = screen.getByLabelText("Service name");
+  input.focus();
+  fireEvent.keyDown(input, { key: "r", metaKey: true });
+  expect(api.control).not.toHaveBeenCalled();
+  fireEvent.keyDown(input, { key: "s", metaKey: true });
+  await waitFor(() => expect(api.saveService).toHaveBeenCalledTimes(1));
+});
+
 it("opens full service output from the sidebar and retains separate workspace tabs", async () => {
   const user = userEvent.setup();
   render(<App />);

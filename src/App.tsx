@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
+import { getVersion } from "@tauri-apps/api/app";
+import packageInfo from "../package.json";
 import {
   api,
   confirmAction,
@@ -50,6 +52,7 @@ const labels: Record<string, string> = {
   failed: "Failed",
 };
 export default function App() {
+  const [version, setVersion] = useState(packageInfo.version);
   const [workspace, setWorkspace] = useState(initial);
   const [projectId, setProjectId] = useState("");
   const [serviceId, setServiceId] = useState("");
@@ -111,6 +114,12 @@ export default function App() {
     return data;
   }, []);
   const observeSelectedLogs = view !== "logs";
+  useEffect(() => {
+    if (!isDesktop()) return;
+    let live = true;
+    void getVersion().then((value) => { if (live) setVersion(value); }).catch(() => {});
+    return () => { live = false; };
+  }, []);
   useEffect(() => {
     let live = true;
     const update = async () => {
@@ -423,6 +432,30 @@ export default function App() {
     });
   }
 
+  useEffect(() => {
+    function shortcut(event: KeyboardEvent) {
+      if (event.metaKey === event.ctrlKey) return;
+      if (event.altKey || event.shiftKey || event.repeat || event.isComposing || event.defaultPrevented) return;
+      const target = event.target;
+      if ((target instanceof Element && target.closest('[role="dialog"]')) || document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]')) return;
+      const key = event.key.toLowerCase();
+      if (key === "s" && (view === "new" || view === "settings")) {
+        const form = document.querySelector<HTMLFormElement>(view === "new" ? ".editor-scroll .service-form" : ".service-settings:not([hidden]) .service-form");
+        if (form) { event.preventDefault(); if (!busy) form.requestSubmit(); }
+        return;
+      }
+      if (target instanceof Element && target.closest("input, textarea, select, [contenteditable]:not([contenteditable='false'])")) return;
+      if (busy) return;
+      if (key === "l") { event.preventDefault(); openLogs(project && service ? { projectId: project.id, serviceId: service.id } : undefined); }
+      else if (project && service && ["service", "settings", "history", "diagnostics"].includes(view) && snapshot.state !== "stopping") {
+        if (key === "r") { event.preventDefault(); void control(active ? "restart" : "start"); }
+        else if (key === "." && active) { event.preventDefault(); void control("stop"); }
+      }
+    }
+    window.addEventListener("keydown", shortcut);
+    return () => window.removeEventListener("keydown", shortcut);
+  });
+
   return (
     <div
       className={`app-shell ops-shell${isDesktop() && /Mac/.test(navigator.platform) ? " mac-window" : ""}`}
@@ -440,7 +473,7 @@ export default function App() {
             <Icon name="terminal" size={18} />
           </span>
           <span>Service Manager</span>
-          <span className="version">0.6</span>
+          <span className="version">{version}</span>
         </div>
         <button
           className="open-folder"
@@ -699,6 +732,7 @@ export default function App() {
                   {service.url && <button className="secondary" disabled={busy || !active || snapshot.state === "stopping"} onClick={() => { void perform(() => api.openUrl(project.id, service.id)); }}>Open URL</button>}
                   <button
                     className="secondary"
+                    title="Restart service (⌘R / Ctrl+R)"
                     disabled={busy || !active || snapshot.state === "stopping"}
                     onClick={() => {
                       void control("restart");
@@ -710,6 +744,7 @@ export default function App() {
                   {active ? (
                     <button
                       className="stop-button"
+                      title="Stop service (⌘. / Ctrl+.)"
                       disabled={busy || snapshot.state === "stopping"}
                       onClick={() => {
                         void control("stop");
@@ -721,6 +756,7 @@ export default function App() {
                   ) : (
                     <button
                       className="primary"
+                      title="Run service (⌘R / Ctrl+R)"
                       disabled={busy}
                       onClick={() => {
                         void control("start");
@@ -792,7 +828,7 @@ export default function App() {
                   </button>
                 ))}
               </div>
-              <button className="secondary" onClick={() => openLogs({ projectId: project.id, serviceId: service.id })}>
+              <button className="secondary" title="Open log workspace (⌘L / Ctrl+L)" onClick={() => openLogs({ projectId: project.id, serviceId: service.id })}>
                 Open in log workspace
               </button>
               <span>
