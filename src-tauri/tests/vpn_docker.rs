@@ -642,6 +642,32 @@ async fn native_vpn_routes_keep_commands_on_host_and_share_gateways() {
             "relay {port} did not reach target"
         );
     }
+    let traffic = || {
+        manager
+            .network_traffic()
+            .into_iter()
+            .find(|row| row.service_id == "native-a1")
+            .unwrap()
+    };
+    let before = traffic();
+    assert!(relay_reachable(ports[0]).await);
+    let after = traffic();
+    assert_eq!(
+        after.tx_bytes - before.tx_bytes,
+        b"GET / HTTP/1.1\r\nHost: synthetic\r\nConnection: close\r\n\r\n".len() as u64
+    );
+    assert_eq!(
+        after.rx_bytes - before.rx_bytes,
+        b"HTTP/1.1 200 OK\r\nContent-Length: 12\r\nConnection: close\r\n\r\nsynthetic-ok".len()
+            as u64
+    );
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    let idle = traffic();
+    assert_eq!(
+        (idle.tx_bytes, idle.rx_bytes),
+        (after.tx_bytes, after.rx_bytes)
+    );
+    println!("live relay telemetry proof: exact TX/RX payload deltas and idle stability");
     assert_eq!(
         docker(&[
             "ps",
