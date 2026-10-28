@@ -338,6 +338,21 @@ pub fn validate(root: &Path, config: &ProjectConfig) -> Result<()> {
     Ok(())
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NetworkTraffic {
+    pub project_id: String,
+    pub service_id: String,
+    pub run_id: String,
+    pub profile_id: String,
+    pub local_port: u16,
+    pub remote_host: String,
+    pub remote_port: u16,
+    pub tx_bytes: u64,
+    pub rx_bytes: u64,
+    pub active_connections: u64,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Snapshot {

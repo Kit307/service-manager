@@ -43,12 +43,34 @@ impl NativeVpnSession {
         true
     }
 }
+type TrafficRegistry =
+    Arc<std::sync::Mutex<HashMap<(String, String), (String, Vec<crate::vpn_relay::RelayTraffic>)>>>;
+
+struct TrafficGuard {
+    registry: TrafficRegistry,
+    key: (String, String),
+    run: String,
+}
+
+impl Drop for TrafficGuard {
+    fn drop(&mut self) {
+        let mut registry = self.registry.lock().unwrap_or_else(|e| e.into_inner());
+        if registry
+            .get(&self.key)
+            .is_some_and(|(run, _)| run == &self.run)
+        {
+            registry.remove(&self.key);
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct Manager {
     pub store: Arc<Mutex<ProjectStore>>,
     pub logs: Arc<Mutex<LogStore>>,
     pub vpns: crate::vpn::VpnManager,
     shutting_down: Arc<AtomicBool>,
+    traffic: TrafficRegistry,
     pub(crate) history: Arc<Mutex<crate::history::HistoryStore>>,
     pub(crate) sequence_lock: Arc<Mutex<()>>,
     pub(crate) sequence_generation: Arc<AtomicU64>,
@@ -65,8 +87,73 @@ impl Manager {
             sequence_generation: Arc::new(AtomicU64::new(0)),
             logs: Arc::new(Mutex::new(LogStore::default())),
             shutting_down: Arc::new(AtomicBool::new(false)),
+            traffic: Arc::new(std::sync::Mutex::new(HashMap::new())),
         })
     }
+    fn register_network_traffic(
+        &self,
+        project: &str,
+        service: &str,
+        run: &str,
+        traffic: Vec<crate::vpn_relay::RelayTraffic>,
+    ) -> TrafficGuard {
+        let key = (project.to_owned(), service.to_owned());
+        self.traffic
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(key.clone(), (run.to_owned(), traffic));
+        TrafficGuard {
+            registry: self.traffic.clone(),
+            key,
+            run: run.to_owned(),
+        }
+    }
+
+    pub fn network_traffic(&self) -> Vec<NetworkTraffic> {
+        let entries = self
+            .traffic
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
+        let mut rows = Vec::new();
+        for ((project_id, service_id), (run_id, traffic)) in entries {
+            for relay in traffic {
+                let snapshot = relay.snapshot();
+                rows.push(NetworkTraffic {
+                    project_id: project_id.clone(),
+                    service_id: service_id.clone(),
+                    run_id: run_id.clone(),
+                    profile_id: snapshot.route.profile_id,
+                    local_port: snapshot.route.local_port,
+                    remote_host: snapshot.route.remote_host,
+                    remote_port: snapshot.route.remote_port,
+                    tx_bytes: snapshot.tx_bytes,
+                    rx_bytes: snapshot.rx_bytes,
+                    active_connections: snapshot.active_connections,
+                });
+            }
+        }
+        rows.sort_by(|a, b| {
+            (
+                &a.project_id,
+                &a.service_id,
+                a.local_port,
+                &a.profile_id,
+                &a.remote_host,
+                a.remote_port,
+            )
+                .cmp(&(
+                    &b.project_id,
+                    &b.service_id,
+                    b.local_port,
+                    &b.profile_id,
+                    &b.remote_host,
+                    b.remote_port,
+                ))
+        });
+        rows
+    }
+
     pub async fn open(&self, path: &str) -> Result<Project> {
         self.store.lock().await.open(path)
     }
@@ -472,6 +559,9 @@ impl Manager {
                 "The process exited before its identity was available.",
             )
         })?;
+        let traffic_guard = route_session.as_ref().map(|session| {
+            self.register_network_traffic(project, service, &run, session._relays.traffic())
+        });
         let key = format!("{project}/{service}");
         let snapshot = Snapshot {
             state: if definition.health_check.is_some() {
@@ -545,14 +635,18 @@ impl Manager {
         let service_id = service.to_string();
         let run_id = run.clone();
         tokio::spawn(async move {
+            let mut traffic_guard = traffic_guard;
+            let mut route_session = route_session;
             let mut wait = Box::pin(child.wait());
             let mut vpn_failure = None;
-            let result = if let Some(session) = route_session.as_ref() {
+            let result = if route_session.is_some() {
                 loop {
                     tokio::select! {
                         result = &mut wait => break result,
                         _ = tokio::time::sleep(Duration::from_secs(1)) => {
-                            if vpn_failure.is_none() && !session.safe().await {
+                            if vpn_failure.is_none() && !route_session.as_ref().unwrap().safe().await {
+                                drop(route_session.take());
+                                drop(traffic_guard.take());
                                 let message = "VPN gateway stopped or ownership was lost. The native service and its loopback relays were stopped.".to_string();
                                 vpn_failure = Some(message.clone());
                                 if let Some(current) = manager
@@ -1331,6 +1425,123 @@ async fn drain(
 mod tests {
     use super::*;
     use tokio::io::AsyncWriteExt;
+
+    #[tokio::test]
+    async fn network_traffic_tracks_current_runs_and_serializes_camel_case() {
+        use crate::vpn_relay::{RelayTarget, VpnRelaySet};
+        let state = tempfile::tempdir().unwrap();
+        let manager = Manager::new(state.path().into()).unwrap();
+        let relay = VpnRelaySet::start(vec![RelayTarget {
+            route: VpnRoute {
+                profile_id: "profile".into(),
+                local_port: 0,
+                remote_host: "example.test".into(),
+                remote_port: 5432,
+            },
+            proxy: "127.0.0.1:1".parse().unwrap(),
+        }])
+        .await
+        .unwrap();
+        assert!(manager.network_traffic().is_empty());
+        let old = manager.register_network_traffic("z", "service", "old", relay.traffic());
+        let first = manager.register_network_traffic("a", "service", "first", relay.traffic());
+        let replacement = manager.register_network_traffic("z", "service", "new", relay.traffic());
+        drop(old);
+        let rows = manager.network_traffic();
+        assert_eq!(rows.len(), 2);
+        assert_eq!((&*rows[0].project_id, &*rows[1].run_id), ("a", "new"));
+        assert_eq!(
+            serde_json::to_value(&rows[1]).unwrap(),
+            serde_json::json!({
+                "projectId":"z", "serviceId":"service", "runId":"new", "profileId":"profile",
+                "localPort":0, "remoteHost":"example.test", "remotePort":5432,
+                "txBytes":0, "rxBytes":0, "activeConnections":0
+            })
+        );
+        drop(first);
+        assert_eq!(manager.network_traffic().len(), 1);
+        drop(replacement);
+        assert!(manager.network_traffic().is_empty());
+    }
+
+    #[tokio::test]
+    async fn network_traffic_stays_empty_on_setup_and_spawn_failure() {
+        let root = tempfile::tempdir().unwrap();
+        let state = tempfile::tempdir().unwrap();
+        let manager = Manager::new(state.path().into()).unwrap();
+        let config = root.path().join("fixture.ovpn");
+        std::fs::write(&config, b"client\n").unwrap();
+        let profile = manager
+            .vpns
+            .import(crate::vpn::VpnImport {
+                name: "fixture".into(),
+                config_path: config.to_string_lossy().into(),
+                username: String::new(),
+                password: String::new(),
+                key_passphrase: String::new(),
+                published_ports: vec![],
+                outbound_subnets: vec![],
+                health_target: String::new(),
+                dns_address: String::new(),
+                health_icmp_target: String::new(),
+            })
+            .await
+            .unwrap();
+        let project = manager.open(root.path().to_str().unwrap()).await.unwrap();
+        let local_port = std::net::TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port();
+        let mut definition = ServiceDefinition {
+            id: "fixture".into(),
+            name: "Fixture".into(),
+            cwd: ".".into(),
+            kind: ServiceKind::Command {
+                command: "true".into(),
+            },
+            env_file: None,
+            health_check: None,
+            ports: vec![],
+            url: None,
+            depends_on: vec![],
+            vpn: None,
+            vpn_routes: vec![VpnRoute {
+                profile_id: profile.id,
+                remote_host: "example.test".into(),
+                remote_port: 5432,
+                local_port,
+            }],
+        };
+        let saved = manager
+            .save(&project.id, definition.clone(), "absent", true)
+            .await
+            .unwrap();
+        assert!(manager.start(&project.id, "fixture", "test").await.is_err());
+        assert_eq!(
+            manager.status(&project.id, "fixture").await.unwrap().activity,
+            "VPN relay setup failed"
+        );
+        assert!(manager.network_traffic().is_empty());
+
+        std::fs::write(
+            root.path().join("fixture.env"),
+            format!("LARGE={}\n", "x".repeat(4 * 1024 * 1024)),
+        )
+        .unwrap();
+        definition.vpn_routes.clear();
+        definition.env_file = Some("fixture.env".into());
+        manager
+            .save(&project.id, definition, &saved.revision, true)
+            .await
+            .unwrap();
+        let error = manager
+            .start(&project.id, "fixture", "test")
+            .await
+            .unwrap_err();
+        assert_eq!(error.code, "PROCESS_START_FAILED");
+        assert!(manager.network_traffic().is_empty());
+    }
 
     #[test]
     fn destination_routes_keep_command_services_on_native_runner() {

@@ -44,6 +44,10 @@ pub struct DesktopState {
     prompting: Arc<AtomicBool>,
 }
 #[tauri::command]
+fn network_traffic(state: State<'_, DesktopState>) -> Vec<NetworkTraffic> {
+    state.manager.network_traffic()
+}
+#[tauri::command]
 async fn workspace(state: State<'_, DesktopState>) -> Result<Value> {
     let projects = state.manager.projects().await;
     let vpns = state.vpn_profiles.lock().await.clone();
@@ -534,6 +538,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             workspace,
+            network_traffic,
             list_vpn_profiles,
             import_vpn_profile,
             update_vpn_network,
