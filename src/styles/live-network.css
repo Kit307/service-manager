@@ -3,7 +3,7 @@
 .network-header h1 { margin: 0; font-size: 26px; }
 .network-header p, .network-detail p, .network-unsupported p { color: var(--muted); margin: 6px 0 0; }
 .network-header > span { white-space: nowrap; color: var(--muted); }
-.network-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin: 20px 0; }
+.network-summary { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; margin: 20px 0; }
 .network-summary > div, .network-graph-scroll, .network-detail, .network-unsupported { background: var(--reading-surface); border: 1px solid var(--control-rim); border-radius: 16px; box-shadow: var(--control-depth); }
 .network-summary > div { padding: 14px 16px; display: grid; gap: 5px; }
 .network-summary strong { font-size: 18px; }
@@ -17,7 +17,8 @@
 .network-lines path { fill: none; stroke: var(--line); stroke-width: 2; }
 .network-pulse.tx { fill: #3498ff; }
 .network-pulse.rx { fill: #a36bff; }
-.network-node { position: relative; min-width: 0; margin: 4px 12px; padding: 12px; display: grid; gap: 4px; border: 1px solid var(--control-edge); border-radius: 12px; background: var(--reading-surface); box-shadow: var(--control-depth); overflow-wrap: anywhere; }
+.network-node { position: relative; min-width: 0; margin: 4px 12px; padding: 12px; display: grid; gap: 4px; border: 1px solid var(--control-edge); border-radius: 12px; background: var(--reading-surface); box-shadow: var(--control-depth); }
+.network-node > :is(strong, span, small) { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .network-route { color: inherit; text-align: left; cursor: pointer; font: inherit; }
 .network-route[aria-pressed="true"] { border: 2px solid var(--selected-ink); }
 .network-route[aria-pressed="true"]::after { content: "Selected"; font-size: 11px; font-weight: 600; }

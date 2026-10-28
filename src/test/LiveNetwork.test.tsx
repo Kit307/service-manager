@@ -78,3 +78,66 @@ it("does not present zero as a measured total when polling fails", () => {
   render(<LiveNetwork workspace={workspace} />);
   expect(screen.getByText("Open connections").parentElement).toHaveTextContent("—");
 });
+
+it("counts current observable routes and pulsing directions, excluding stopped and missing samples", () => {
+  traffic.samples = [sample, { ...sample, serviceId: "b", localPort: 1003, remoteHost: "other.local", remotePort: 443 }];
+  traffic.activity = { "p/a/run/1001": { tx: true, rx: true }, "p/b/run/1003": { tx: true, rx: true } };
+  render(<LiveNetwork workspace={workspace} />);
+  expect(screen.getByText("Observable routes").parentElement).toHaveTextContent("1");
+  expect(screen.getByText("Pulsing directions").parentElement).toHaveTextContent("2");
+});
+
+it("includes the resolved profile in each duplicate destination route name", () => {
+  const changed = structuredClone(workspace);
+  const service = changed.projects[0].config.services[0];
+  if (service.type === "command" && service.vpnRoutes) service.vpnRoutes[1].profileId = "vpn2";
+  changed.vpns?.push({ id: "vpn2", name: "Other VPN", publishedPorts: [], outboundSubnets: [], healthTarget: "", state: "running", users: [] });
+  render(<LiveNetwork workspace={changed} />);
+  expect(screen.getByRole("button", { name: /Work VPN.*db.local:5432/ })).toBeVisible();
+  expect(screen.getByRole("button", { name: /Other VPN.*db.local:5432/ })).toBeVisible();
+});
+
+it("keeps the repaired selection when a removed route returns", async () => {
+  const { rerender } = render(<LiveNetwork workspace={workspace} />);
+  await userEvent.click(screen.getAllByRole("button", { name: /db.local:5432/ })[1]);
+  const changed = structuredClone(workspace);
+  const service = changed.projects[0].config.services[0];
+  if (service.type === "command") service.vpnRoutes = service.vpnRoutes?.slice(0, 1);
+  rerender(<LiveNetwork workspace={changed} />);
+  rerender(<LiveNetwork workspace={workspace} />);
+  expect(within(screen.getByLabelText("Route details")).getByText("1001")).toBeVisible();
+});
+
+it("provides full titles and accessible route name for long labels", () => {
+  const changed = structuredClone(workspace);
+  changed.projects[0].config.services[0].name = "Long service name that exceeds the card width";
+  if (changed.vpns) changed.vpns[0].name = "Long VPN profile name that exceeds the card width";
+  const service = changed.projects[0].config.services[0];
+  if (service.type === "command" && service.vpnRoutes) service.vpnRoutes[0].remoteHost = "very-long-destination-name.example.internal";
+  render(<LiveNetwork workspace={changed} />);
+  expect(screen.getAllByTitle("Long service name that exceeds the card width")[0]).toBeVisible();
+  expect(screen.getAllByTitle("Long VPN profile name that exceeds the card width")[0]).toBeVisible();
+  expect(screen.getAllByTitle("very-long-destination-name.example.internal:5432")).toHaveLength(2);
+  expect(screen.getByRole("button", { name: /Long service name.*Long VPN profile name.*very-long-destination-name/ })).toBeVisible();
+});
+
+it("marks partial sample coverage and does not present missing routes as measured totals", () => {
+  traffic.samples = [sample];
+  render(<LiveNetwork workspace={workspace} />);
+  expect(screen.getByText("1 of 2 active routes observed")).toBeVisible();
+  expect(screen.getByText("Open connections").parentElement).toHaveTextContent("—");
+});
+
+it.each([[true, false], [false, true]] as const)("counts a single active direction", (tx, rx) => {
+  traffic.samples = [sample]; traffic.activity = { "p/a/run/1001": { tx, rx } };
+  render(<LiveNetwork workspace={workspace} />);
+  expect(screen.getByText("Pulsing directions").parentElement).toHaveTextContent("1");
+});
+
+it("reports no samples while active routes await observation", () => {
+  render(<LiveNetwork workspace={workspace} />);
+  expect(screen.getByText("0 of 2 active routes observed")).toBeVisible();
+  expect(screen.getByText("Open connections").parentElement).toHaveTextContent("—");
+  expect(screen.getByText("TX total").parentElement).toHaveTextContent("—");
+  expect(screen.getByText("RX total").parentElement).toHaveTextContent("—");
+});
